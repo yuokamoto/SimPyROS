@@ -1,0 +1,14 @@
+# Core simulation framework
+simpy>=4.0.0
+
+# Numerical computing and linear algebra
+numpy>=1.20.0
+
+# Scientific computing and spatial transformations
+scipy>=1.7.0
+
+# Optional: For more advanced features (uncomment if needed)
+# matplotlib>=3.5.0  # For visualization and plotting
+# pandas>=1.3.0      # For data analysis and logging
+# pyyaml>=6.0        # For YAML configuration files
+# h5py>=3.0.0        # For HDF5 data storage
