@@ -75,6 +75,25 @@ class Pose:
     def copy(self) -> 'Pose':
         return Pose.from_position_rotation(self.position, self.rotation)
     
+    def to_transformation_matrix(self) -> np.ndarray:
+        """Convert pose to 4x4 transformation matrix for PyVista/VTK"""
+        matrix = np.eye(4)
+        matrix[:3, :3] = self.rotation.as_matrix()
+        matrix[:3, 3] = self.position
+        return matrix
+    
+    def __str__(self) -> str:
+        """String representation of pose showing position and rotation"""
+        roll_deg = math.degrees(self.roll)
+        pitch_deg = math.degrees(self.pitch)
+        yaw_deg = math.degrees(self.yaw)
+        return (f"Pose(pos=({self.x:.3f}, {self.y:.3f}, {self.z:.3f}), "
+                f"rot=({roll_deg:.1f}°, {pitch_deg:.1f}°, {yaw_deg:.1f}°))")
+    
+    def __repr__(self) -> str:
+        """Detailed representation of pose"""
+        return self.__str__()
+    
     def transform_by(self, parent_pose: 'Pose') -> 'Pose':
         """Transform this pose by parent pose"""
         # Rotate position by parent's rotation

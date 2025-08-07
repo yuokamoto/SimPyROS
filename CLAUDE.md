@@ -1,6 +1,42 @@
 # SimPyROS 開発状況 - Claude Code セッションメモ
 
-## 最新状況（2025-08-06完了分）
+## 最新状況（2025-08-07完了分）
+
+### 今日完了した主要改善
+
+#### 1. プロジェクト構成の大幅整理
+- **examplesフォルダ統合**: 17個のファイル → 7個の構造化デモ
+- **重複ファイル削除**: 機能が重複していた古いデモファイルを統合・削除
+- **英語統一**: プログラム内コメント・出力メッセージ・ドキュメントを英語に統一
+
+#### 2. Pose表示の改善
+- **数値表示対応**: `__str__`メソッド追加
+- **Before**: `<simulation_object.Pose object at 0x...>`
+- **After**: `Pose(pos=(2.000, 1.000, 0.000), rot=(0.0°, 0.0°, 45.0°))`
+
+#### 3. visualization_demo.pyの重要な修正
+- **Real-time factor追加**: アニメーション速度を制御可能
+  - `python visualization_demo.py 0.5` (半分の速度)
+  - `python visualization_demo.py 2.0` (倍速)
+- **センサー設定修正**: STATIC → DYNAMIC（robotの動作を可能に）
+- **コード構造改善**: 重複するwhileループを関数化
+- **Phase 4座標系修正**: world座標とlocal座標の混同を修正
+
+#### 4. Phase 4ターゲット接近の根本的修正
+**問題**: Robotがtargetに向かわない（逆方向に移動）
+**原因**: 速度をロボットのローカル座標で指定するのに、方向をワールド座標で計算
+**解決**: ワールド座標からローカル座標への適切な変換
+
+```python
+# ❌ 修正前（間違い）
+world_direction = target_pos - robot_pos
+robot.set_velocity(Velocity(linear_x=world_direction[0], ...))
+
+# ✅ 修正後（正しい）
+world_direction = (target_pos - robot_pos) / distance
+local_direction = robot.pose.rotation.inv().apply(world_direction)
+robot.set_velocity(Velocity(linear_x=local_direction[0], ...))
+```
 
 ### 完了した主要機能
 
@@ -9,141 +45,165 @@
   - 双方向接続システム（親子関係なし）
   - クォータニオンベース3D回転（数値精度向上）
   - 静的オブジェクト制約（静的オブジェクトに接続されたオブジェクトは移動不可）
+  - **改善されたPose表示**: 数値が読みやすい形式
   - SimPy Environment統合
 
-#### 2. 3D視覚化システム
+#### 2. 3D視覚化システム（大幅改善済み）
 - **visualizer.py**: matplotlib 3D可視化
-  - リアルタイムアニメーション
-  - 軌跡表示・座標フレーム表示
-  - **マウス視点制御の永続化**（本日最後の改善）
-  - ヘッドレス環境対応（自動PNG出力）
-  - Ctrl+C対応のグレースフル終了
+- **visualization_demo.py**: リアルタイム制御対応
+  - **Real-time factorによる速度制御**
+  - **正確なタイミング同期**: 瞬時実行→スムーズアニメーション
+  - **Phase-based simulation**: 構造化された4段階フェーズ
+  - **Dynamic target approach**: 距離監視による適応的停止
+  - **Coordinate system fix**: ワールド・ローカル座標の適切な変換
 
-#### 3. プロジェクト構造整理
-- **examples/フォルダ統合完了**
-- **demos/ → examples/への統合**
-- **詳細ドキュメント完備**
+#### 3. PyVista高品質3D視覚化
+- **pyvista_simple_demo.py**: VTKベース高品質レンダリング
+- 3Dロボットメッシュ生成と表示
+- ヘッドレス環境対応（X11エラー時の自動フォールバック）
 
-### ファイル構成
+### ファイル構成（整理後）
 
 ```
 SimPyROS/
-├── simulation_object.py      # メインフレームワーク
-├── visualizer.py            # 3D視覚化（視点永続化対応）
+├── simulation_object.py      # メインフレームワーク（Pose表示改善済み）
+├── visualizer.py            # 3D視覚化
 ├── requirements.txt         # 依存関係
 ├── .gitignore              # Git設定
 ├── Appendix.md             # 技術詳細・SimPy.rt比較
-├── examples/
-│   ├── README.md           # 全ファイル詳細説明
-│   ├── example.py          # 基本機能デモ
-│   ├── example_connected.py # 双方向接続デモ
-│   ├── example_visualization.py # 3D視覚化デモ
-│   ├── headless_realtime_demo.py # 手動制御リアルタイム（推奨）
-│   ├── simple_realtime_demo.py # 手動制御基礎
-│   ├── simpy_rt_demo.py    # SimPy.rt代替実装
-│   ├── interactive_visualization_demo.py # インタラクティブ制御
-│   └── view_control_demo.py # 視点制御テスト
-├── tests/
-│   ├── test_rotation_accuracy.py
-│   ├── test_static_constraint.py
-│   ├── test_visualization_static.py
-│   ├── test_ctrl_c.py
-│   └── test_realtime.py
-└── output/                 # 生成PNG保存先
-    ├── frame_XXX.png       # アニメーションフレーム
-    └── *.png              # 各種出力画像
+├── examples/               # 統合デモ集（7ファイル）
+│   ├── README.md           # English documentation
+│   ├── basic_demo.py       # 統合基本機能デモ（新規）
+│   ├── visualization_demo.py # 改良3D視覚化（real-time factor対応）
+│   ├── realtime_demo_simple.py # 軽量リアルタイム
+│   ├── fixed_realtime_demo.py # 堅牢リアルタイム
+│   ├── pyvista_simple_demo.py # 高品質3D
+│   └── simpy_rt_demo.py    # SimPy.rt代替実装
+└── output/                 # 生成ファイル保存先
+    ├── *.png              # 画像出力
+    └── *.json             # データ出力
 ```
 
-### 重要な設計判断
+### 重要な技術的修正
 
-#### リアルタイム実装の2方式提供
-1. **手動制御方式（推奨）**: `time.sleep()`ベース、高性能・クロスプラットフォーム
-2. **SimPy.rt方式（代替）**: 教育・学習目的、プラットフォーム依存性あり
-
-詳細は `Appendix.md` に技術的背景を記載済み。
-
-### 最新の技術的改善
-
-#### 1. 視点制御の永続化（本日最後の修正）
-**問題**: アニメーション更新で手動視点変更がリセット
-**解決**: 
+#### 1. Real-time Factor Implementation
 ```python
-# visualizer.py内
-def _update_plot(self, frame):
-    # クリア前に視点を保存
-    self._current_elev = self.ax.elev
-    self._current_azim = self.ax.azim
-    
-    self.ax.clear()
-    self._setup_plot()  # 保存視点で復元
+# 瞬時実行を防止し、指定速度でアニメーション実行
+def run_simulation_phase(end_time, phase_setup=None, dynamic_check=None):
+    while env.now < end_time:
+        env.run(until=env.now + dt)
+        
+        # Real-time synchronization
+        elapsed_real_time = time.time() - sim_start_time
+        expected_sim_time = elapsed_real_time * real_time_factor
+        
+        if env.now > expected_sim_time:
+            sleep_time = (env.now - expected_sim_time) / real_time_factor
+            time.sleep(sleep_time)
 ```
 
-#### 2. マウス操作サポート
-- **左ドラッグ**: 視点回転（永続化対応）
-- **右ドラッグ**: パン
-- **マウスホイール**: ズーム
-- **ダブルクリック**: 座標表示（一部デモ）
+#### 2. 座標系変換の正確な実装
+```python
+# ワールド座標の方向をロボットのローカル座標に変換
+world_direction = (target_pos - robot_pos) / distance
+local_direction = robot.pose.rotation.inv().apply(world_direction)
+robot.set_velocity(Velocity(linear_x=local_direction[0] * speed, ...))
+```
 
-#### 3. キーボードショートカット
-- `'p'`: 一時停止/再開
-- `'r'`: 視点リセット
-- `'c'`: 軌跡クリア
-- `'t'`: 接続線表示切り替え
-- `'q'`: 終了
+#### 3. 動的フェーズ制御
+```python
+# 距離に基づく早期終了機能
+def check_target_distance():
+    current_distance = np.linalg.norm(target.pose.position - robot.pose.position)
+    if current_distance < 1.0:
+        robot.stop()
+        return False  # Stop the phase
+    return True
+```
 
 ### 動作確認済み機能
 
 ```bash
-# 基本機能
-python examples/example.py                    # ✅
-python examples/example_connected.py         # ✅
-python examples/test_static_constraint.py    # ✅
+# 基本機能（英語出力）
+python examples/basic_demo.py                    # ✅ 統合基本デモ
 
-# 視覚化（視点制御改善済み）
-python examples/example_visualization.py     # ✅
-python examples/view_control_demo.py         # ✅
+# 視覚化（速度制御対応）
+python examples/visualization_demo.py            # ✅ 通常速度
+python examples/visualization_demo.py 0.5        # ✅ 半分の速度
+python examples/visualization_demo.py 2.0        # ✅ 倍速
+python examples/visualization_demo.py static     # ✅ 静的表示
 
-# リアルタイム実行
-python examples/headless_realtime_demo.py quick  # ✅
-python examples/simpy_rt_demo.py 1               # ✅
+# リアルタイム処理
+python examples/realtime_demo_simple.py          # ✅ 軽量データ出力
+python examples/fixed_realtime_demo.py           # ✅ PyVista + フォールバック
+python examples/pyvista_simple_demo.py           # ✅ 高品質3D描画
 ```
+
+### コード品質向上
+
+#### 1. 英語統一完了
+- **Comments**: 全て英語
+- **Docstrings**: 英語で統一
+- **Output messages**: 英語で統一
+- **Documentation**: 英語で統一
+
+#### 2. 構造化改善
+- **関数の再利用**: 重複コード削除（約40行削減）
+- **データ駆動設計**: フェーズ定義をデータ構造化
+- **Error handling**: 堅牢なフォールバック機能
+
+#### 3. 数値表示改善
+- **Pose objects**: 人が読める数値表示
+- **Debug output**: 詳細な状態情報
+- **Performance metrics**: FPS、距離、時間の正確な測定
 
 ### 次回作業の推奨開始方法
 
 #### 1. 状況確認
 ```bash
 cd /home/rr/SimPyROS
-python examples/example.py                    # 基本動作確認
-python examples/view_control_demo.py          # 最新機能確認
+python examples/basic_demo.py                    # 基本動作確認
+python examples/visualization_demo.py 0.5        # 改良されたアニメーション確認
 ```
 
-#### 2. 必要に応じて依存関係確認
+#### 2. 新機能テスト
 ```bash
-pip install -r requirements.txt
+# Real-time factor機能テスト
+python examples/visualization_demo.py 0.3        # ゆっくり観察
+python examples/visualization_demo.py 5.0        # 高速実行
+
+# データ出力テスト
+python examples/realtime_demo_simple.py          # JSON出力確認
+ls output/                                        # 生成ファイル確認
 ```
 
 #### 3. ドキュメント参照
-- `examples/README.md`: 実行方法と機能説明
+- `examples/README.md`: 統合された使用方法（英語）
 - `Appendix.md`: 技術的背景
-- このファイル（CLAUDE.md）: 開発履歴
+- このファイル（CLAUDE.md）: 最新開発履歴
 
 ### 今後の開発候補
 
-#### 近い将来
-- ロボットモデル読み込み（URDF/SDF対応強化）
-- 物理エンジン統合検討
-- パフォーマンス最適化
+#### 高優先度
+- **物理演算統合**: PyBulletとの連携
+- **URDF/SDF読み込み強化**: 実ロボットモデル対応
+- **追加センサーモデル**: LiDAR, カメラ等
 
-#### 中長期
-- ROS2連携
-- 複雑なシナリオテンプレート
-- 機械学習連携
+#### 中優先度  
+- **Multi-robot scenarios**: 複数ロボット協調
+- **Path planning integration**: 経路計画アルゴリズム
+- **Performance optimization**: 大規模シミュレーション対応
+
+#### 低優先度
+- **ROS2連携**: ROS 2ノードとしての実行
+- **Web UI**: ブラウザベース制御インターフェース
+- **機械学習連携**: 強化学習環境対応
 
 ### 開発環境
 
 - **OS**: Linux (Ubuntu系)
 - **Python**: 3.x
-- **主要依存**: simpy, scipy, matplotlib, numpy
+- **主要依存**: simpy, scipy, matplotlib, numpy, pyvista
 - **推奨実行**: examples/フォルダから各デモを実行
 
 ---
@@ -151,9 +211,12 @@ pip install -r requirements.txt
 ## 作業再開時のチェックリスト
 
 □ `cd /home/rr/SimPyROS`で作業ディレクトリに移動  
-□ `python examples/example.py`で基本動作確認  
-□ `python examples/view_control_demo.py`で最新機能確認  
+□ `python examples/basic_demo.py`で基本動作確認  
+□ `python examples/visualization_demo.py 0.5`で改良アニメーション確認  
+□ `ls output/`で生成ファイル確認  
 □ 必要に応じて`pip install -r requirements.txt`  
 □ 新機能開発前にCLAUDE.mdの内容を確認
 
 **このファイル（CLAUDE.md）を参照すれば、前回までの作業内容と現在の状況が把握できます。**
+
+**今日の成果**: プロジェクト構造の整理、座標系修正、アニメーション速度制御、英語統一が完了し、より使いやすく保守しやすいフレームワークになりました。

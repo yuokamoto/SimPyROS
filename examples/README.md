@@ -1,136 +1,149 @@
 # SimPyROS Examples
 
-このフォルダには、SimPyROSシミュレーションフレームワークの使用例が含まれています。
+Integrated demo collection for the SimPyROS simulation framework.
 
-## ファイル一覧
+## 📁 File Structure (7 Files)
 
-### 基本例
+### 1. `basic_demo.py` - Basic Operations Learning
+**Purpose**: Understanding fundamental SimPyROS features
+**Contents**:
+- Object creation, connection, and movement
+- Bidirectional connection system testing
+- Static constraint behavior verification
+**Usage**: `python examples/basic_demo.py`
+**Learning Focus**: Basic operations and connection systems
 
-#### `example.py`
-SimPyROSの基本機能を学習するためのシンプルな例
-- **目的**: 基本的なオブジェクト作成、接続、移動の仕組みを理解する
-- **内容**: 
-  - 親オブジェクト（ロボット）と子オブジェクト（センサー）の作成
-  - オブジェクト間の接続（attach/detach機能）
-  - 回転、移動、テレポート操作のテスト
-- **実行方法**: `python examples/example.py`
-- **学習ポイント**: オブジェクトの基本操作と座標変換の理解
+### 2. `visualization_demo.py` - 3D Visualization
+**Purpose**: 3D display using matplotlib with controllable animation speed
+**Contents**:
+- Real-time 3D animation with precise timing control
+- Four distinct motion phases (circular, figure-8, complex, approach)
+- Trajectory display and coordinate frame visualization
+- Adjustable animation speed via real-time factor
+- Clean phase-based simulation architecture
+**Usage**: 
+- Normal speed: `python examples/visualization_demo.py`
+- Static display: `python examples/visualization_demo.py static`
+- Custom speed: `python examples/visualization_demo.py 0.5` (half speed)
+- Fast mode: `python examples/visualization_demo.py 2.0` (double speed)
+**Learning Focus**: 3D visualization system with temporal control
+**Dependencies**: `pip install matplotlib`
 
-#### `example_connected.py` 
-複数オブジェクト間の双方向接続システムのテスト例
-- **目的**: 複雑な接続関係での動作確認
-- **内容**:
-  - 3つのオブジェクト（A、B、C）のチェーン接続
-  - 双方向接続による相互影響の確認
-  - 接続/切断操作のテスト
-- **実行方法**: `python examples/example_connected.py`
-- **学習ポイント**: 双方向接続システムの仕組みと効果
+### 3. `realtime_demo_simple.py` - Real-time Processing
+**Purpose**: Lightweight real-time simulation
+**Contents**:
+- 3 robot types (Racer, Explorer, Guardian)
+- Real-time data export (JSON)
+- Different motion patterns
+**Usage**: `python examples/realtime_demo_simple.py`
+**Output**: `output/realtime_*.json`
+**Learning Focus**: Data-focused real-time processing
 
-### 視覚化例
+### 4. `fixed_realtime_demo.py` - Advanced Real-time
+**Purpose**: PyVista + fallback support
+**Contents**:
+- PyVista 3D rendering (when available)
+- Automatic fallback (data-only mode)
+- Screenshot generation
+**Usage**: `python examples/fixed_realtime_demo.py`
+**Output**: `output/fixed_realtime_*.json`, `output/realtime_render_*.png`
+**Learning Focus**: Robust real-time systems
 
-#### `example_visualization.py`
-3D視覚化機能を使用したインタラクティブなシミュレーション
-- **目的**: リアルタイム3D視覚化の体験
-- **内容**:
-  - 複数のオブジェクト（ロボット、センサー、ターゲット、障害物）
-  - リアルタイムアニメーション
-  - 軌跡表示と座標フレーム表示
-  - 複数のモーションパターン（円運動、8の字、螺旋など）
-- **実行方法**: 
-  - アニメーション版: `python examples/example_visualization.py`
-  - 静的版: `python examples/example_visualization.py static`
-- **学習ポイント**: 3D視覚化システムの活用方法
-- **注意**: matplotlib が必要（`pip install matplotlib`）
+### 5. `pyvista_simple_demo.py` - High-quality 3D Rendering
+**Purpose**: Professional 3D visualization using PyVista
+**Contents**:
+- High-quality 3D robot meshes
+- Headless environment support
+- Animation sequence generation
+**Usage**: `python examples/pyvista_simple_demo.py`
+**Output**: `output/safe_robot_render.png`, `output/robot_*.png`
+**Learning Focus**: Professional 3D visualization
+**Dependencies**: `pip install pyvista`
 
-### リアルタイムデモ
+### 6. `simpy_rt_demo.py` - SimPy.rt Method
+**Purpose**: SimPy built-in real-time functionality
+**Contents**:
+- simpy.rt.RealtimeEnvironment usage
+- 3 demo patterns (circular/multi-robot/interactive)
+- Automatic time scale adjustment
+**Usage**: `python examples/simpy_rt_demo.py [1|2|3]`
+**Learning Focus**: SimPy.rt features and limitations
+**Note**: Platform dependent (see Appendix.md)
 
-SimPyROSでは、リアルタイム実行のために2つの異なるアプローチを提供しています：
+## 🚀 Recommended Learning Course
 
-#### 手動制御方式（推奨）
+### Beginner Course (Essential)
+1. **`basic_demo.py`** - Understand basic operations
+2. **`visualization_demo.py static`** - Experience static 3D display
+3. **`visualization_demo.py`** - Experience dynamic 3D display
+4. **`realtime_demo_simple.py`** - Experience real-time processing
 
-##### `headless_realtime_demo.py`
-GUI環境がない場合でも動作するリアルタイムデモ（PNG出力対応）
-- **方式**: 手動制御（`time.sleep()`使用）
-- **目的**: ヘッドレス環境での視覚化とフレーム保存
-- **内容**:
-  - リアルタイム物理シミュレーション
-  - 定期的なPNGフレーム保存（output/フォルダ）
-  - 複数のモーションパターン（円運動→8の字→螺旋）
-  - 複数実行モード（quick/detailed/analysis）
-- **実行方法**:
-  - 標準: `python examples/headless_realtime_demo.py`
-  - 高速: `python examples/headless_realtime_demo.py quick`
-  - 詳細: `python examples/headless_realtime_demo.py detailed`
-  - 解析用: `python examples/headless_realtime_demo.py analysis`
-- **出力**: output/frame_XXX.png ファイル
-- **学習ポイント**: ヘッドレス環境でのシミュレーション実行
+### Advanced Course (Optional)
+5. **`pyvista_simple_demo.py`** - Experience high-quality 3D rendering
+6. **`fixed_realtime_demo.py`** - Experience robust systems
+7. **`simpy_rt_demo.py 1`** - Experience alternative real-time method
 
-##### `simple_realtime_demo.py`
-シンプルなリアルタイムシミュレーション例
-- **方式**: 手動制御（`time.sleep()`使用）
-- **目的**: リアルタイム実行の基本パターンの理解
-- **内容**: 基本的なリアルタイム動作とタイミング制御
-- **実行方法**: `python examples/simple_realtime_demo.py`
-- **学習ポイント**: リアルタイム制御の基礎
+## 📊 Feature Comparison Table
 
-#### SimPy.rt方式（代替実装）
+| Demo | 3D Display | Real-time | Data Output | Difficulty | Use Case |
+|------|------------|-----------|-------------|------------|----------|
+| basic_demo | ❌ | ❌ | ❌ | ⭐ | Basic learning |
+| visualization_demo | ✅ matplotlib | ✅ | ❌ | ⭐⭐ | 3D understanding |
+| realtime_demo_simple | ❌ | ✅ | ✅ JSON | ⭐⭐ | Data processing |
+| fixed_realtime_demo | ✅ PyVista* | ✅ | ✅ JSON+PNG | ⭐⭐⭐ | Professional development |
+| pyvista_simple_demo | ✅ PyVista | ❌ | ✅ PNG | ⭐⭐⭐ | High-quality visualization |
+| simpy_rt_demo | ❌ | ✅ SimPy.rt | ❌ | ⭐⭐ | Alternative method |
 
-##### `simpy_rt_demo.py`
-SimPy.rtを使用したリアルタイムシミュレーション例
-- **方式**: SimPy.rt（`simpy.rt.RealtimeEnvironment`使用）
-- **目的**: SimPy組み込みリアルタイム機能の体験
-- **内容**:
-  - 円運動デモ、複数ロボット相互作用、インタラクティブパターン
-  - 自動時間スケール調整（高速起動→リアルタイム移行）
-  - 複数実行モード（3つのデモから選択）
-- **実行方法**:
-  - 円運動: `python examples/simpy_rt_demo.py 1`
-  - 複数ロボット: `python examples/simpy_rt_demo.py 2`
-  - インタラクティブ: `python examples/simpy_rt_demo.py 3`
-- **学習ポイント**: SimPy.rtの機能と制限の理解
-- **注意**: Appendix.mdを参照してください（プラットフォーム依存性あり）
+*Automatic fallback support
 
-### 2つのリアルタイム方式の比較
+## 🛠 Required Dependencies
 
-| 項目 | 手動制御方式 | SimPy.rt方式 |
-|------|-------------|-------------|
-| **パフォーマンス** | 高速 | 同期オーバーヘッドあり |
-| **プラットフォーム互換性** | 良好 | Windows > Linux |
-| **制御の柔軟性** | 高い | 制限あり |
-| **実装の複雑さ** | 中程度 | シンプル |
-| **用途** | 研究・分析・本格運用 | 教育・デモ・プロトタイプ |
-
-**推奨**: 一般的な用途では手動制御方式をお勧めします。詳細はAppendix.mdを参照してください。
-
-## 実行順序の推奨
-
-### 基本学習コース
-1. **`example.py`** - 基本操作の理解
-2. **`example_connected.py`** - 接続システムの理解  
-3. **`example_visualization.py static`** - 静的視覚化の体験
-4. **`example_visualization.py`** - リアルタイム視覚化の体験
-5. **`headless_realtime_demo.py quick`** - ヘッドレス環境での実行体験（推奨リアルタイム方式）
-
-### リアルタイム実装比較コース
-6. **`simple_realtime_demo.py`** - 手動制御方式の基礎
-7. **`simpy_rt_demo.py 1`** - SimPy.rt方式の体験
-8. 両方式の特徴比較（Appendix.md参照）
-
-## 必要な依存関係
-
+**Basic execution**:
 ```bash
-pip install simpy scipy matplotlib numpy
+pip install simpy scipy numpy
 ```
 
-## トラブルシューティング
+**3D visualization**:
+```bash
+pip install matplotlib
+```
 
-- **ImportError**: 親ディレクトリの`simulation_object.py`と`visualizer.py`が必要です
-- **Display関連エラー**: ヘッドレス環境では自動的にPNG出力モードに切り替わります
-- **matplotlib関連エラー**: `pip install matplotlib`で解決できます
+**High-quality 3D**:
+```bash  
+pip install pyvista
+```
 
-## 出力ファイル
+## 📁 Output Files
 
-視覚化例やデモの実行により、以下のファイルが`output/`フォルダに保存されます：
-- `frame_XXX.png`: アニメーションフレーム
-- `visualization_output.png`: 視覚化結果
-- その他の分析用画像ファイル
+Each demo generates files in the `output/` folder:
+
+**Data files**:
+- `realtime_*.json` - Robot state snapshots
+- `complete_trajectories.json` - Complete trajectory data
+
+**Image files**:
+- `frame_*.png` - matplotlib frames
+- `realtime_render_*.png` - PyVista rendering  
+- `safe_robot_render.png` - High-quality robot images
+
+## ⚠️ Troubleshooting
+
+**ImportError**:
+- Requires `simulation_object.py` and `visualizer.py` in parent directory
+
+**Display-related errors**:
+- Automatically switches to PNG output mode in headless environments
+
+**PyVista-related errors**:
+- Automatically falls back to data-only mode on X11 errors
+
+## 📝 Next Steps
+
+After running demos, consider:
+
+1. **Custom simulation development**: Create your own robot simulations based on the basic structure
+2. **URDF model integration**: Add robot model file (URDF/SDF) loading capabilities  
+3. **Physics engine integration**: Connect with physics engines like PyBullet
+4. **ROS integration**: Execute simulations as ROS 2 nodes
+
+For details, see `Appendix.md` in the parent directory.
