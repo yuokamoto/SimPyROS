@@ -6,18 +6,44 @@ Demonstrates basic PyVista functionality with fallback support
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import numpy as np
 
 # Try to import PyVista with fallback
 try:
+    # Configure PyVista for headless operation BEFORE import
+    os.environ['PYVISTA_OFF_SCREEN'] = 'true'
+    os.environ['PYVISTA_USE_PANEL'] = 'false'
+    os.environ['VTK_SILENCE_GET_VOID_POINTER_WARNINGS'] = '1'
+    
+    # Check if display is available
+    display_available = bool(os.environ.get('DISPLAY', ''))
+    
     import pyvista as pv
+    import vtk
+    
+    # Configure VTK for headless operation if no display
+    if not display_available:
+        # Use mesa software rendering
+        try:
+            vtk.vtkOpenGLRenderWindow.SetGlobalMaximumNumberOfMultiSamples(0)
+            pv.start_xvfb()  # Start virtual framebuffer if available
+        except:
+            pass
+    
+    # Force off-screen rendering for headless environments
+    pv.OFF_SCREEN = True
+    pv.set_plot_theme('document')
+    
     PYVISTA_AVAILABLE = True
-    print("PyVista imported successfully")
+    print(f"PyVista imported successfully (display_available: {display_available})")
 except ImportError as e:
     PYVISTA_AVAILABLE = False
     print(f"PyVista not available: {e}")
+except Exception as e:
+    PYVISTA_AVAILABLE = False
+    print(f"PyVista configuration error: {e}")
 
 from simulation_object import Pose
 import math
@@ -105,6 +131,9 @@ def test_headless_rendering():
         return False
         
     try:
+        # Ensure off-screen rendering
+        pv.OFF_SCREEN = True
+        
         # Create plotter with off-screen rendering
         print("Creating off-screen plotter...")
         plotter = pv.Plotter(off_screen=True, window_size=(800, 600))
@@ -159,6 +188,9 @@ def test_animation_sequence():
         return False
         
     try:
+        # Ensure off-screen rendering
+        pv.OFF_SCREEN = True
+        
         os.makedirs("output", exist_ok=True)
         poses = robot_animation_poses()
         

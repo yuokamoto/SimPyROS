@@ -1,149 +1,157 @@
 # SimPyROS Examples
 
-Integrated demo collection for the SimPyROS simulation framework.
+This directory contains comprehensive examples showcasing the SimPyROS robotics simulation framework with multiple visualization backends and approaches.
 
-## 📁 File Structure (7 Files)
+## 📁 Directory Structure
 
-### 1. `basic_demo.py` - Basic Operations Learning
-**Purpose**: Understanding fundamental SimPyROS features
-**Contents**:
+### 🎯 `basic/` - Foundation Examples
+**Start here for learning SimPyROS fundamentals**
+```bash
+python basic/basic_demo.py
+```
+**Features:**
 - Object creation, connection, and movement
-- Bidirectional connection system testing
+- Bidirectional connection system testing  
 - Static constraint behavior verification
-**Usage**: `python examples/basic_demo.py`
-**Learning Focus**: Basic operations and connection systems
+- No 3D visualization (text output only)
 
-### 2. `visualization_demo.py` - 3D Visualization
-**Purpose**: 3D display using matplotlib with controllable animation speed
-**Contents**:
-- Real-time 3D animation with precise timing control
-- Four distinct motion phases (circular, figure-8, complex, approach)
-- Trajectory display and coordinate frame visualization
-- Adjustable animation speed via real-time factor
-- Clean phase-based simulation architecture
-**Usage**: 
-- Normal speed: `python examples/visualization_demo.py`
-- Static display: `python examples/visualization_demo.py static`
-- Custom speed: `python examples/visualization_demo.py 0.5` (half speed)
-- Fast mode: `python examples/visualization_demo.py 2.0` (double speed)
-**Learning Focus**: 3D visualization system with temporal control
-**Dependencies**: `pip install matplotlib`
+### 🎮 `pyvista/` - Interactive 3D Visualization ⭐**Recommended**
+**High-quality interactive 3D demos using PyVista**
 
-### 3. `realtime_demo_simple.py` - Real-time Processing
-**Purpose**: Lightweight real-time simulation
-**Contents**:
-- 3 robot types (Racer, Explorer, Guardian)
-- Real-time data export (JSON)
-- Different motion patterns
-**Usage**: `python examples/realtime_demo_simple.py`
-**Output**: `output/realtime_*.json`
-**Learning Focus**: Data-focused real-time processing
+#### `pyvista_robot_demo.py` - Interactive Real-time Demo
+```bash
+python pyvista/pyvista_robot_demo.py 10    # 10-second interactive demo
+```
+**Features:**
+- Real-time 3D window with interactive camera controls
+- Figure-8 robot motion pattern with trajectory trails
+- Live FPS and position display
+- Mouse controls: Left-drag (rotate), Right-drag (zoom), Middle-drag (pan)
 
-### 4. `fixed_realtime_demo.py` - Advanced Real-time
-**Purpose**: PyVista + fallback support
-**Contents**:
-- PyVista 3D rendering (when available)
-- Automatic fallback (data-only mode)
-- Screenshot generation
-**Usage**: `python examples/fixed_realtime_demo.py`
-**Output**: `output/fixed_realtime_*.json`, `output/realtime_render_*.png`
-**Learning Focus**: Robust real-time systems
-
-### 5. `pyvista_simple_demo.py` - High-quality 3D Rendering
-**Purpose**: Professional 3D visualization using PyVista
-**Contents**:
-- High-quality 3D robot meshes
+#### `pyvista_simple_demo.py` - Image Generation & Testing
+```bash
+python pyvista/pyvista_simple_demo.py
+```
+**Features:**
+- Mesh creation and transformation testing
+- Screenshot generation with off-screen rendering
+- Animation frame sequence creation
 - Headless environment support
-- Animation sequence generation
-**Usage**: `python examples/pyvista_simple_demo.py`
-**Output**: `output/safe_robot_render.png`, `output/robot_*.png`
-**Learning Focus**: Professional 3D visualization
-**Dependencies**: `pip install pyvista`
 
-### 6. `simpy_rt_demo.py` - SimPy.rt Method
-**Purpose**: SimPy built-in real-time functionality
-**Contents**:
-- simpy.rt.RealtimeEnvironment usage
-- 3 demo patterns (circular/multi-robot/interactive)
-- Automatic time scale adjustment
-**Usage**: `python examples/simpy_rt_demo.py [1|2|3]`
-**Learning Focus**: SimPy.rt features and limitations
-**Note**: Platform dependent (see Appendix.md)
 
-## 🚀 Recommended Learning Course
 
-### Beginner Course (Essential)
-1. **`basic_demo.py`** - Understand basic operations
-2. **`visualization_demo.py static`** - Experience static 3D display
-3. **`visualization_demo.py`** - Experience dynamic 3D display
-4. **`realtime_demo_simple.py`** - Experience real-time processing
 
-### Advanced Course (Optional)
-5. **`pyvista_simple_demo.py`** - Experience high-quality 3D rendering
-6. **`fixed_realtime_demo.py`** - Experience robust systems
-7. **`simpy_rt_demo.py 1`** - Experience alternative real-time method
+## 🚀 Quick Start Guide
 
-## 📊 Feature Comparison Table
+### 1. Absolute Beginner
+```bash
+python basic/basic_demo.py                # Learn fundamentals
+```
 
-| Demo | 3D Display | Real-time | Data Output | Difficulty | Use Case |
-|------|------------|-----------|-------------|------------|----------|
-| basic_demo | ❌ | ❌ | ❌ | ⭐ | Basic learning |
-| visualization_demo | ✅ matplotlib | ✅ | ❌ | ⭐⭐ | 3D understanding |
-| realtime_demo_simple | ❌ | ✅ | ✅ JSON | ⭐⭐ | Data processing |
-| fixed_realtime_demo | ✅ PyVista* | ✅ | ✅ JSON+PNG | ⭐⭐⭐ | Professional development |
-| pyvista_simple_demo | ✅ PyVista | ❌ | ✅ PNG | ⭐⭐⭐ | High-quality visualization |
-| simpy_rt_demo | ❌ | ✅ SimPy.rt | ❌ | ⭐⭐ | Alternative method |
+### 2. Interactive 3D (Recommended)
+```bash
+python pyvista/pyvista_robot_demo.py 5    # Modern interactive 3D
+```
 
-*Automatic fallback support
+### 3. View Generated Images
+```bash
+ls ../output/pyvista_*.png               # Check PyVista outputs
+ls ../output/frame_*.png                 # Check matplotlib outputs
+```
 
-## 🛠 Required Dependencies
+## 📊 Examples Comparison
 
-**Basic execution**:
+| Category | Demo | 3D Display | Interactive | Real-time | Data Output | Difficulty |
+|----------|------|------------|-------------|-----------|-------------|------------|
+| **Basic** | basic_demo | ❌ | ❌ | ❌ | ❌ Text | ⭐ |
+| **PyVista** | pyvista_robot_demo | ✅ VTK | ✅ Mouse | ✅ | ❌ | ⭐⭐ |
+| **PyVista** | pyvista_simple_demo | ✅ VTK | ❌ | ❌ | ✅ PNG | ⭐⭐ |
+
+## 🛠 Requirements
+
+### Core Dependencies
 ```bash
 pip install simpy scipy numpy
 ```
 
-**3D visualization**:
+### Visualization Dependencies
 ```bash
+# For PyVista examples (recommended)
+pip install pyvista
+
+# For matplotlib examples
 pip install matplotlib
 ```
 
-**High-quality 3D**:
-```bash  
-pip install pyvista
+### Complete Installation
+```bash
+pip install pyvista matplotlib simpy scipy numpy
 ```
 
 ## 📁 Output Files
 
-Each demo generates files in the `output/` folder:
+Generated files are saved to the `../output/` directory:
 
-**Data files**:
-- `realtime_*.json` - Robot state snapshots
-- `complete_trajectories.json` - Complete trajectory data
+**PyVista outputs:**
+- `pyvista_test.png` - Static robot rendering
+- `pyvista_frame_*.png` - Animation sequences  
+- `pyvista_robot_*.png` - Robot pose variations
+- `realtime_render_*.png` - Real-time demo screenshots
 
-**Image files**:
-- `frame_*.png` - matplotlib frames
-- `realtime_render_*.png` - PyVista rendering  
-- `safe_robot_render.png` - High-quality robot images
+**Data outputs:**
+- `*.json` - Simulation data exports
+- `complete_trajectories.json` - Full trajectory data
+
+## 🎮 Interactive Controls
+
+**PyVista demos (pyvista_robot_demo.py):**
+- **Mouse Left Button + Drag:** Rotate camera
+- **Mouse Right Button + Drag:** Zoom in/out  
+- **Mouse Middle Button + Drag:** Pan camera
+- **Close Window:** Exit demo
 
 ## ⚠️ Troubleshooting
 
-**ImportError**:
-- Requires `simulation_object.py` and `visualizer.py` in parent directory
+### PyVista Issues
+- **Window doesn't open:** Check DISPLAY variable, try `pyvista_simple_demo.py` first
+- **Performance issues:** Reduce demo duration, check GPU drivers
+- **Import errors:** `pip install pyvista`
 
-**Display-related errors**:
-- Automatically switches to PNG output mode in headless environments
+### Matplotlib Issues
+- **Slow animation:** Adjust real-time factor parameter
+- **Display issues:** Works in most environments, fallback for PyVista
 
-**PyVista-related errors**:
-- Automatically falls back to data-only mode on X11 errors
+### General Issues
+- **Import errors:** Ensure `simulation_object.py` is in parent directory
+- **Path issues:** Run from SimPyROS root directory
 
-## 📝 Next Steps
+## 🗂️ Legacy Code
 
-After running demos, consider:
+Previous experimental code has been moved to the `legacy/` directory for reference.
 
-1. **Custom simulation development**: Create your own robot simulations based on the basic structure
-2. **URDF model integration**: Add robot model file (URDF/SDF) loading capabilities  
-3. **Physics engine integration**: Connect with physics engines like PyBullet
-4. **ROS integration**: Execute simulations as ROS 2 nodes
+## 📝 Learning Path
 
-For details, see `Appendix.md` in the parent directory.
+**Recommended progression:**
+1. **`basic/basic_demo.py`** - Understand core concepts
+2. **`pyvista/pyvista_simple_demo.py`** - Learn 3D basics
+3. **`pyvista/pyvista_robot_demo.py`** - Experience interactive 3D
+
+**Alternative/Legacy:**
+- **`../legacy/examples/visualization_demo.py`** - Traditional matplotlib approach
+
+## 🔧 Development Notes
+
+### Adding New Examples
+- Place in appropriate category folder
+- Follow existing naming conventions
+- Update this README.md
+- Test in both GUI and headless environments
+
+### Preferred Stack
+- **Primary:** PyVista for interactive 3D visualization
+- **Secondary:** Matplotlib for educational/simple cases
+- **Fallback:** Text output for compatibility
+
+---
+
+**Focus:** Comprehensive examples covering basic concepts to advanced interactive 3D robotics simulation.

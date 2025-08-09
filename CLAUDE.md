@@ -62,25 +62,29 @@ robot.set_velocity(Velocity(linear_x=local_direction[0], ...))
 - 3Dロボットメッシュ生成と表示
 - ヘッドレス環境対応（X11エラー時の自動フォールバック）
 
-### ファイル構成（整理後）
+### ファイル構成（PyVista主体に整理完了 - 2025-08-09）
 
 ```
 SimPyROS/
 ├── simulation_object.py      # メインフレームワーク（Pose表示改善済み）
-├── visualizer.py            # 3D視覚化
 ├── requirements.txt         # 依存関係
 ├── .gitignore              # Git設定
 ├── Appendix.md             # 技術詳細・SimPy.rt比較
-├── examples/               # 統合デモ集（7ファイル）
-│   ├── README.md           # English documentation
-│   ├── basic_demo.py       # 統合基本機能デモ（新規）
-│   ├── visualization_demo.py # 改良3D視覚化（real-time factor対応）
-│   ├── realtime_demo_simple.py # 軽量リアルタイム
-│   ├── fixed_realtime_demo.py # 堅牢リアルタイム
-│   ├── pyvista_simple_demo.py # 高品質3D
-│   └── simpy_rt_demo.py    # SimPy.rt代替実装
+├── CLAUDE.md               # 開発履歴（このファイル）
+├── examples/               # PyVistaメイン（3ファイル）
+│   ├── README.md           # PyVista主体の説明書
+│   ├── pyvista_robot_demo.py # インタラクティブ3Dデモ（メイン）
+│   ├── pyvista_simple_demo.py # 画像生成・テスト用
+│   └── realtime_demo.py    # マルチロボット・データ出力
+├── legacy/                 # レガシーコード保管庫
+│   ├── README.md           # レガシー説明
+│   ├── visualizer.py       # matplotlib視覚化（旧メイン）
+│   ├── examples/           # matplotlib系デモ
+│   ├── backends/           # 旧バックエンド群
+│   └── tests/              # 旧テストファイル
+├── tests/                  # 現行テストファイル
 └── output/                 # 生成ファイル保存先
-    ├── *.png              # 画像出力
+    ├── pyvista_*.png      # PyVista画像出力
     └── *.json             # データ出力
 ```
 
@@ -121,22 +125,19 @@ def check_target_distance():
     return True
 ```
 
-### 動作確認済み機能
+### 動作確認済み機能（PyVista主体 - 2025-08-09更新）
 
 ```bash
-# 基本機能（英語出力）
-python examples/basic_demo.py                    # ✅ 統合基本デモ
+# メインPyVistaデモ
+python examples/pyvista_robot_demo.py 5          # ✅ インタラクティブ3Dウィンドウ
+python examples/pyvista_robot_demo.py 10         # ✅ 長時間デモ
+python examples/pyvista_simple_demo.py           # ✅ 画像生成・ヘッドレス対応
+python examples/realtime_demo.py                 # ✅ マルチロボット・データ出力
 
-# 視覚化（速度制御対応）
-python examples/visualization_demo.py            # ✅ 通常速度
-python examples/visualization_demo.py 0.5        # ✅ 半分の速度
-python examples/visualization_demo.py 2.0        # ✅ 倍速
-python examples/visualization_demo.py static     # ✅ 静的表示
-
-# リアルタイム処理
-python examples/realtime_demo_simple.py          # ✅ 軽量データ出力
-python examples/fixed_realtime_demo.py           # ✅ PyVista + フォールバック
-python examples/pyvista_simple_demo.py           # ✅ 高品質3D描画
+# レガシーデモ（互換性維持）
+python legacy/examples/visualization_demo.py     # ✅ matplotlib基本デモ
+python legacy/examples/basic_demo.py             # ✅ 基本操作学習
+python legacy/examples/realtime_demo_simple.py   # ✅ 軽量リアルタイム
 ```
 
 ### コード品質向上
@@ -219,4 +220,101 @@ ls output/                                        # 生成ファイル確認
 
 **このファイル（CLAUDE.md）を参照すれば、前回までの作業内容と現在の状況が把握できます。**
 
-**今日の成果**: プロジェクト構造の整理、座標系修正、アニメーション速度制御、英語統一が完了し、より使いやすく保守しやすいフレームワークになりました。
+## 最新更新（2025-08-09）
+
+### プロジェクト構造の大幅整理完了
+
+#### 1. PyVistaメイン化
+- **PyVistaを主要バックエンド**に変更（リアルタイム3D描画対応）
+- **インタラクティブ3Dウィンドウ**の実装完了
+- **ヘッドレス環境対応**強化（X11エラー解決）
+
+#### 2. ファイル構造整理
+- **legacy/フォルダ**作成：matplotlib系コードを移動
+- **examples/**を3ファイルに集約：PyVistaデモのみ
+- **重複・非効率コード**の除去
+
+#### 3. 主要デモの確立
+- **pyvista_robot_demo.py**: リアルタイムインタラクティブ3D（メイン）
+- **pyvista_simple_demo.py**: 画像生成・テスト用
+- **realtime_demo.py**: マルチロボット・データ出力
+
+#### 4. ドキュメント更新
+- **examples/README.md**: PyVista主体の新説明書
+- **legacy/README.md**: レガシーコード説明追加
+- **CLAUDE.md**: 最新状況反映（このファイル）
+
+### 動作確認済み機能
+```bash
+python examples/pyvista_robot_demo.py 5    # ✅ 3Dインタラクティブウィンドウ
+python examples/pyvista_simple_demo.py     # ✅ ヘッドレス画像生成
+python examples/realtime_demo.py           # ✅ マルチロボットデモ
+```
+
+## 追加更新（2025-08-09午後）
+
+### examples/構造の再整理と最適化
+
+#### 1. カテゴリ別フォルダ構成の導入
+- **examples/basic/** - 基礎学習用デモ（basic_demo.py）
+- **examples/pyvista/** - インタラクティブ3Dデモ（PyVistaメイン）
+  - pyvista_robot_demo.py（インタラクティブリアルタイム）
+  - pyvista_simple_demo.py（画像生成・テスト）
+
+#### 2. 重複・複雑デモの整理
+- **realtime_demo.py削除**: 複雑すぎるマルチロボットデモを legacy/ に移動
+- **matplotlib系の整理**: visualization_demo.py を legacy/ に戻し依存関係を整理
+- **alternative系の整理**: simpy_rt_demo.py も legacy/ に移動（visualizer依存のため）
+
+#### 3. requirements.txt の最適化
+**現在のexamples/実行に必要な最小依存関係:**
+```
+simpy>=4.0.0      # 基本シミュレーション
+numpy>=1.20.0     # 数値計算
+scipy>=1.7.0      # 空間変換
+pyvista>=0.40.0   # 3D視覚化（メイン）
+vtk>=9.0.0        # PyVistaバックエンド
+```
+
+#### 4. シンプルで明確な学習パス
+1. `examples/basic/basic_demo.py` - 基礎概念理解
+2. `examples/pyvista/pyvista_simple_demo.py` - 3D基本
+3. `examples/pyvista/pyvista_robot_demo.py` - インタラクティブ体験
+
+#### 5. 動作確認済み最終構成
+```bash
+# メインデモ（全て動作確認済み）
+python examples/basic/basic_demo.py                  # ✅ 基礎学習
+python examples/pyvista/pyvista_simple_demo.py       # ✅ 3D画像生成
+python examples/pyvista/pyvista_robot_demo.py 5      # ✅ インタラクティブ3D
+
+# レガシーデモ（互換性維持）
+python legacy/examples/visualization_demo.py         # ✅ matplotlib基本
+python legacy/examples/realtime_demo.py              # ✅ 複雑マルチロボット
+```
+
+### 完成した最終構造
+
+```
+SimPyROS/
+├── simulation_object.py      # メインフレームワーク
+├── requirements.txt         # 最適化済み依存関係
+├── CLAUDE.md               # 開発履歴（このファイル）
+├── examples/               # シンプル化された学習用デモ
+│   ├── README.md           # 包括的な説明書
+│   ├── basic/              # 基礎学習
+│   │   └── basic_demo.py   
+│   └── pyvista/            # インタラクティブ3D（メイン）
+│       ├── pyvista_robot_demo.py    # インタラクティブリアルタイム
+│       └── pyvista_simple_demo.py   # 画像生成・テスト
+├── legacy/                 # 旧版・複雑版デモ保管
+│   ├── README.md           # レガシー説明
+│   ├── visualizer.py       # matplotlib視覚化
+│   ├── examples/           # 旧デモ群
+│   ├── backends/           # 旧バックエンド
+│   └── tests/              # 旧テスト
+├── tests/                  # 現行テスト
+└── output/                 # 生成ファイル
+```
+
+**今日の最終成果**: PyVistaをメインとしつつ、学習しやすさを重視した構造に最適化。重複を除去し、依存関係を最小限にして、明確な学習パスを提供する実用的なロボットシミュレーション環境が完成しました。

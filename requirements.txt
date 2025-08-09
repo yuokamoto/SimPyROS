@@ -1,19 +1,29 @@
+# SimPyROS Core Requirements
+# Essential dependencies for running examples/
+
 # Core simulation framework
 simpy>=4.0.0
 
-# Numerical computing and linear algebra
+# Numerical computing and transformations
 numpy>=1.20.0
-
-# Scientific computing and spatial transformations
 scipy>=1.7.0
 
-# Visualization and plotting
-matplotlib>=3.5.0
-
-# Advanced 3D visualization (optional but recommended)
+# Primary 3D visualization (PyVista examples - recommended)
 pyvista>=0.40.0
+vtk>=9.0.0
 
-# Optional: For more advanced features (uncomment if needed)
-# pandas>=1.3.0      # For data analysis and logging
-# pyyaml>=6.0        # For YAML configuration files
+# Standard library modules used: math, time, sys, os, traceback
+# These are built-in Python modules and don't need to be installed
+
+# Current examples dependencies:
+# - basic/basic_demo.py: Only uses core dependencies (already included)
+# - pyvista/*: Uses PyVista and core dependencies (already included)
+
+# Legacy examples (in legacy/ directory) require additional dependencies
+# but are not included here to keep main installation minimal:
+# matplotlib>=3.5.0  # For legacy/examples/visualization_demo.py
+
+# Development/Optional dependencies:
+# pandas>=1.3.0      # For advanced data analysis
+# pyyaml>=6.0        # For configuration files
 # h5py>=3.0.0        # For HDF5 data storage
