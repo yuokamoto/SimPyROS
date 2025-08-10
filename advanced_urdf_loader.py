@@ -199,14 +199,39 @@ class AdvancedURDFLoader:
             except Exception as e:
                 warnings.warn(f"Failed to extract joint origin for {joint.name}: {e}")
         
+        # Extract joint type with debug info
+        joint_type = getattr(joint, 'type', getattr(joint, 'joint_type', 'fixed'))
+        parent_link = getattr(joint, 'parent', 'unknown') 
+        child_link = getattr(joint, 'child', 'unknown')
+        
+        # Debug output for joint type  
+        print(f"  Joint {joint.name}: type={joint_type}, parent={parent_link}, child={child_link}")
+        
+        # Extract axis and limits
+        axis = getattr(joint, 'axis', None)
+        if axis is not None:
+            axis = np.array(axis)
+        
+        limits = None
+        if hasattr(joint, 'limit') and joint.limit is not None:
+            limit_obj = joint.limit
+            limits = {
+                'lower': getattr(limit_obj, 'lower', -np.pi),
+                'upper': getattr(limit_obj, 'upper', np.pi),
+                'velocity': getattr(limit_obj, 'velocity', 1.0),
+                'effort': getattr(limit_obj, 'effort', 100.0)
+            }
+        
         # Create advanced joint
         adv_joint = AdvancedJoint(
             name=joint.name,
-            joint_type=getattr(joint, 'joint_type', 'fixed'),
-            parent_link=getattr(joint, 'parent', 'unknown'),
-            child_link=getattr(joint, 'child', 'unknown'), 
+            joint_type=joint_type,
+            parent_link=parent_link,
+            child_link=child_link, 
             origin_pos=origin_pos,
-            origin_rot=origin_rot
+            origin_rot=origin_rot,
+            axis=axis,
+            limits=limits
         )
         
         # Debug output
