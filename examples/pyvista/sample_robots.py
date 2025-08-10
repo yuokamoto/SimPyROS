@@ -11,13 +11,17 @@ from typing import Optional
 class SampleRobotFactory:
     """Factory class for creating sample geometric robot meshes"""
     @staticmethod
-    def create_robot_mesh(pv_module, type):
-        if type == 'basic_robot':
+    def create_robot_mesh(pv_module, robot_type):
+        """Create robot mesh based on type"""
+        if robot_type == 'basic_robot':
             return SampleRobotFactory.create_basic_robot(pv_module)
-        if type == 'wheeled_robot':
+        elif robot_type == 'wheeled_robot':
             return SampleRobotFactory.create_wheeled_robot(pv_module)
-        if type == 'quadcopter':
+        elif robot_type == 'quadcopter':
             return SampleRobotFactory.create_quadcopter(pv_module)
+        else:
+            print(f"Unknown robot type: {robot_type}")
+            return None
 
     @staticmethod
     def create_basic_robot(pv_module) -> Optional:
@@ -192,4 +196,4 @@ class SampleRobotFactory:
     @staticmethod
     def get_available_types():
         """Get list of available sample robot types"""
-        return ['basic', 'wheeled', 'quadcopter', 'humanoid']
+        return ['basic_robot', 'wheeled_robot', 'quadcopter']

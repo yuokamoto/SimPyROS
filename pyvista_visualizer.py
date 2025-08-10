@@ -538,6 +538,7 @@ def setup_basic_scene(visualizer: PyVistaVisualizer) -> bool:
 
 # Robot mesh creation function
 def create_robot_mesh_from_urdf(visualizer: PyVistaVisualizer, urdf_path: str = None, package_path: str = None):
+    """Create a robot mesh from URDF file"""
     if not visualizer.available:
         return None
         

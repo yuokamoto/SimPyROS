@@ -18,7 +18,7 @@ from pyvista_visualizer import (
 )
 from sample_robots import SampleRobotFactory
 
-OUTPUT_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
+OUTPUT_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'output')
 os.makedirs(OUTPUT_FILE_PATH, exist_ok=True)
 
 

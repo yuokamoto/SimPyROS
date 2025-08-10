@@ -32,7 +32,7 @@ from simulation_object import Pose
 from pyvista_visualizer import create_interactive_visualizer, setup_basic_scene, AnimationController
 from sample_robots import SampleRobotFactory
 
-OUTPUT_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
+OUTPUT_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'output')
 os.makedirs(OUTPUT_FILE_PATH, exist_ok=True)
 
 def interactive_demo(duration_seconds=10, robot_type='wheeled'):
@@ -131,7 +131,7 @@ def main():
     
     # Parse command line arguments
     duration = 10.0
-    robot_type = 'wheeled'
+    robot_type = 'wheeled_robot'
     
     if len(sys.argv) > 1:
         try:
@@ -146,7 +146,7 @@ def main():
         if robot_type not in valid_types:
             print(f"❌ Invalid robot type '{robot_type}', using 'wheeled_robot'")
             print(f"Valid types: {', '.join(valid_types)}")
-            robot_type = 'wheeled'
+            robot_type = 'wheeled_robot'
 
     # Display configuration
     print(f"Duration: {duration} seconds")
