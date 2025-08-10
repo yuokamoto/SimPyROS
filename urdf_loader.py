@@ -137,25 +137,25 @@ class URDFLoader:
                     geom = visual.geometry
                     
                     if hasattr(geom, 'box') and geom.box:
-                        adv_link.geometry_type = "box"
-                        adv_link.geometry_params = {
+                        urdf_link.geometry_type = "box"
+                        urdf_link.geometry_params = {
                             'size': getattr(geom.box, 'size', [1.0, 1.0, 1.0])
                         }
                     elif hasattr(geom, 'cylinder') and geom.cylinder:
-                        adv_link.geometry_type = "cylinder"
-                        adv_link.geometry_params = {
+                        urdf_link.geometry_type = "cylinder"
+                        urdf_link.geometry_params = {
                             'radius': getattr(geom.cylinder, 'radius', 0.1),
                             'length': getattr(geom.cylinder, 'length', 1.0)
                         }
                     elif hasattr(geom, 'sphere') and geom.sphere:
-                        adv_link.geometry_type = "sphere"
-                        adv_link.geometry_params = {
+                        urdf_link.geometry_type = "sphere"
+                        urdf_link.geometry_params = {
                             'radius': getattr(geom.sphere, 'radius', 0.1)
                         }
                     elif hasattr(geom, 'mesh') and geom.mesh:
-                        adv_link.geometry_type = "mesh"
-                        adv_link.mesh_path = getattr(geom.mesh, 'filename', None)
-                        adv_link.geometry_params = {
+                        urdf_link.geometry_type = "mesh"
+                        urdf_link.mesh_path = getattr(geom.mesh, 'filename', None)
+                        urdf_link.geometry_params = {
                             'scale': getattr(geom.mesh, 'scale', [1.0, 1.0, 1.0])
                         }
                 
