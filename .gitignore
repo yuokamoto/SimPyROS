@@ -85,7 +85,7 @@ ipython_config.py
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+.python-version
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
@@ -127,6 +127,17 @@ ENV/
 env.bak/
 venv.bak/
 
+# SimPyROS specific virtual environments (as recommended in README)
+simpyros-env/
+simpyros/
+SimPyROS-env/
+
+# Conda environments
+environment.yml
+environment.yaml
+*.conda
+.conda/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -165,6 +176,7 @@ dmypy.json
 venv*/
 env*/
 .virtualenv*/
+simpyros-env*/
 
 # VSCode
 .vscode/
@@ -206,6 +218,23 @@ plots/
 *.svg
 *.pdf
 
+# SimPyROS specific generated files
+test_robot.urdf
+*.urdf.bak
+*.urdf.tmp
+
+# Development and debugging files
+debug_output/
+screenshots/
+robot_recordings/
+simulation_logs/
+benchmark_data/
+
+# PyVista cache files
+.pyvista_cache/
+*.vtk.tmp
+*.mesh.tmp
+
 # Configuration files with sensitive data
 config.ini
 config.yaml
@@ -225,3 +254,18 @@ docs/_build/
 *.bak
 *.backup
 *~
+
+# Additional SimPyROS exclusions
+# User-specific virtual environment names (common variations)
+*-env/
+*_env/
+my-*/
+my_*/
+personal*/
+local*/
+
+# Runtime data and cache
+.cache/
+cache/
+tmp/
+temp/

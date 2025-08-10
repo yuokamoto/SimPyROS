@@ -34,8 +34,8 @@ except ImportError:
 
 
 @dataclass
-class AdvancedLink:
-    """Advanced link representation with material support"""
+class URDFLink:
+    """URDF link representation with material support"""
     name: str
     geometry_type: str  # 'box', 'cylinder', 'sphere', 'mesh'
     geometry_params: Dict  # dimensions, radius, etc.
@@ -45,8 +45,8 @@ class AdvancedLink:
 
 
 @dataclass  
-class AdvancedJoint:
-    """Advanced joint representation"""
+class URDFJoint:
+    """URDF joint representation"""
     name: str
     joint_type: str  # 'fixed', 'revolute', 'prismatic', etc.
     parent_link: str
@@ -57,14 +57,14 @@ class AdvancedJoint:
     limits: Optional[Dict] = None
 
 
-class AdvancedURDFLoader:
-    """Advanced URDF loader supporting multiple libraries and features"""
+class URDFLoader:
+    """URDF loader supporting multiple libraries and features"""
     
     def __init__(self, package_path: Optional[str] = None):
         self.package_path = package_path
         self.urdf_object = None
-        self.links: Dict[str, AdvancedLink] = {}
-        self.joints: Dict[str, AdvancedJoint] = {}
+        self.links: Dict[str, URDFLink] = {}
+        self.joints: Dict[str, URDFJoint] = {}
         self.robot_name = "unknown_robot"
         
     def is_available(self) -> bool:
@@ -123,7 +123,7 @@ class AdvancedURDFLoader:
     
     def _process_link_yourdfpy(self, link):
         """Process a link from yourdfpy"""
-        adv_link = AdvancedLink(
+        urdf_link = URDFLink(
             name=link.name,
             geometry_type="unknown",
             geometry_params={}
@@ -164,10 +164,10 @@ class AdvancedURDFLoader:
                     if hasattr(visual.material, 'color') and visual.material.color:
                         if hasattr(visual.material.color, 'rgba'):
                             rgba = visual.material.color.rgba
-                            adv_link.color = tuple(rgba)
+                            urdf_link.color = tuple(rgba)
                             print(f"    Material color for {link.name}: rgba={rgba}")
         
-        self.links[link.name] = adv_link
+        self.links[link.name] = urdf_link
     
     def _process_joint_yourdfpy(self, joint):
         """Process a joint from yourdfpy"""
@@ -222,8 +222,8 @@ class AdvancedURDFLoader:
                 'effort': getattr(limit_obj, 'effort', 100.0)
             }
         
-        # Create advanced joint
-        adv_joint = AdvancedJoint(
+        # Create URDF joint
+        urdf_joint = URDFJoint(
             name=joint.name,
             joint_type=joint_type,
             parent_link=parent_link,
@@ -240,7 +240,7 @@ class AdvancedURDFLoader:
         rot_str = f"rot={rot_euler}°"
         print(f"  Joint {joint.name} origin: {pos_str}, {rot_str}")
         
-        self.joints[joint.name] = adv_joint
+        self.joints[joint.name] = urdf_joint
     
     def get_mesh_files(self) -> List[str]:
         """Get list of mesh files referenced in URDF"""
@@ -373,7 +373,7 @@ class AdvancedURDFLoader:
         
     def print_info(self):
         """Print comprehensive robot information"""
-        print(f"\n🤖 Advanced Robot Information")
+        print(f"\n🤖 Robot Information")
         print(f"Library: {URDF_LIBRARY}")
         print(f"Name: {self.robot_name}")
         print(f"Links: {len(self.links)}")

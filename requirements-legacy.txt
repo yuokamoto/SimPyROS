@@ -1,0 +1,27 @@
+# SimPyROS Legacy Support Requirements
+# Additional dependencies for running legacy/ folder examples
+
+# Include core requirements first
+-r requirements.txt
+
+# ===== Legacy URDF Parsers =====
+# These have dependency conflicts and are only needed for legacy/ folder
+# Install these only if you need legacy examples compatibility
+
+# Legacy URDF parser (used by legacy/loaders/urdf_loader.py)
+# Warning: May conflict with newer packages
+urdfpy==0.0.22            # Alternative URDF parser (legacy support only)
+pycollada==0.6            # COLLADA/DAE mesh file support (required by urdfpy)
+
+# ===== Legacy Visualization =====
+# Already included in requirements.txt but listed here for completeness
+# matplotlib>=3.5.0       # For legacy visualization examples
+
+# ===== Usage Notes =====
+# To install legacy support:
+# pip install -r requirements-legacy.txt
+#
+# This may cause conflicts with core functionality!
+# Only install if you specifically need legacy/ folder examples.
+#
+# For most users, stick with requirements.txt for the main functionality.

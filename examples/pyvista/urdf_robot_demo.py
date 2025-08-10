@@ -188,13 +188,19 @@ def setup_visualization(robot, target, urdf_path=None):
     # Create robot mesh
     robot_mesh = None
     if urdf_path and os.path.exists(urdf_path):
-        print(f"Loading robot from URDF: {urdf_path}")
+        print(f"🔄 Loading robot from URDF: {urdf_path}")
         robot_mesh = create_robot_mesh(visualizer, robot_type='urdf', urdf_path=urdf_path)
+        if robot_mesh:
+            print(f"✅ Successfully created robot mesh from URDF")
+        else:
+            print(f"❌ Failed to create robot mesh from URDF")
         
     # Fallback to built-in mesh if URDF loading fails
     if robot_mesh is None:
-        print("URDF loading failed or not available, using built-in wheeled robot mesh")
+        print("🔄 URDF loading failed or not available, using built-in wheeled robot mesh")
         robot_mesh = create_robot_mesh(visualizer, robot_type='wheeled')
+        if robot_mesh:
+            print("✅ Built-in wheeled robot mesh created successfully")
     
     if robot_mesh:
         # Add robot to animation controller
@@ -262,9 +268,16 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
     """Run the complete demo"""
     print(f"Starting URDF Robot Demo (duration: {duration}s)")
     
+    # Debug: Show what URDF path we received
+    if urdf_path:
+        print(f"URDF path provided: {urdf_path}")
+        print(f"URDF file exists: {os.path.exists(urdf_path)}")
+        if os.path.exists(urdf_path):
+            print(f"URDF absolute path: {os.path.abspath(urdf_path)}")
+    
     # Create test URDF if none provided
     if not urdf_path:
-        print("Creating test URDF file...")
+        print("No URDF path provided - creating test URDF file...")
         urdf_path = "test_robot.urdf"
         create_simple_robot_urdf(urdf_path)
         print(f"Test URDF created: {urdf_path}")
@@ -444,9 +457,20 @@ def main():
                     duration = 10.0
             elif urdf_path is None:  # Second positional arg is URDF path
                 urdf_path = arg
+                # Try to resolve the path relative to current directory and script directory
                 if not os.path.exists(urdf_path):
-                    print(f"URDF file not found: {urdf_path}")
-                    urdf_path = None
+                    # Try relative to script directory
+                    script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    alternative_path = os.path.join(script_dir, urdf_path)
+                    if os.path.exists(alternative_path):
+                        urdf_path = alternative_path
+                        print(f"Found URDF at: {urdf_path}")
+                    else:
+                        print(f"URDF file not found at:")
+                        print(f"  - {arg}")
+                        print(f"  - {alternative_path}")
+                        print(f"Will use fallback test robot.")
+                        urdf_path = None
         i += 1
     
     print("=" * 60)

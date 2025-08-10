@@ -12,16 +12,16 @@ from typing import Optional, Tuple, List, Dict, Union
 
 # Import URDF loaders in order of preference
 try:
-    from advanced_urdf_loader import AdvancedURDFLoader
-    ADVANCED_URDF_SUPPORT = True
-except ImportError:
-    ADVANCED_URDF_SUPPORT = False
-
-try:
     from urdf_loader import URDFLoader
     URDF_SUPPORT = True
 except ImportError:
     URDF_SUPPORT = False
+
+try:
+    from legacy.loaders.urdf_loader import URDFLoader as LegacyURDFLoader
+    LEGACY_URDF_SUPPORT = True
+except ImportError:
+    LEGACY_URDF_SUPPORT = False
 
 try:
     from simple_urdf_loader import SimpleURDFLoader
@@ -143,11 +143,11 @@ class RobotMeshFactory:
         Returns:
             Combined PyVista mesh or None
         """
-        # Try advanced URDF loader first (supports yourdfpy, urchin, etc.)
-        if ADVANCED_URDF_SUPPORT:
+        # Try URDF loader first (supports yourdfpy)
+        if URDF_SUPPORT:
             try:
-                print("Using advanced URDF loader...")
-                loader = AdvancedURDFLoader(package_path)
+                print("Using URDF loader...")
+                loader = URDFLoader(package_path)
                 if loader.is_available() and loader.load_urdf(urdf_path):
                     
                     # Create individual meshes with colors
@@ -171,19 +171,19 @@ class RobotMeshFactory:
                         
                         return combined_mesh
                     else:
-                        print("Advanced URDF loader: individual mesh creation failed")
+                        print("URDF loader: individual mesh creation failed")
                         
                         # Fallback to original combined mesh method
-                        mesh = loader.create_pyvista_mesh(pv_module)
+                        mesh = loader.get_combined_mesh(pv_module)
                         if mesh:
                             loader.print_info()
                             return mesh
                         else:
-                            print("Advanced URDF loader: mesh creation failed")
+                            print("URDF loader: mesh creation failed")
                 else:
-                    print("Advanced URDF loader: loading failed")
+                    print("URDF loader: loading failed")
             except Exception as e:
-                print(f"Advanced URDF loader error: {e}")
+                print(f"URDF loader error: {e}")
         
         # Fallback to simple URDF loader (no heavy dependencies)
         if SIMPLE_URDF_SUPPORT:
@@ -201,35 +201,34 @@ class RobotMeshFactory:
             except Exception as e:
                 print(f"Simple URDF loader failed: {e}")
         
-        # Fallback to full URDF loader
-        if not URDF_SUPPORT:
-            print("❌ Advanced URDF support not available. Install urdfpy and trimesh.")
-            return None
-            
-        try:
-            print("Trying advanced URDF loader...")
-            loader = URDFLoader(package_path=package_path)
-            if not loader.is_available():
-                print("❌ URDF loader dependencies not available")
-                return None
+        # Fallback to legacy URDF loader
+        if LEGACY_URDF_SUPPORT:
+            try:
+                print("Trying legacy URDF loader...")
+                loader = LegacyURDFLoader(package_path=package_path)
+                if not loader.is_available():
+                    print("❌ Legacy URDF loader dependencies not available")
+                    return None
+                    
+                if not loader.load_urdf(urdf_path):
+                    print(f"❌ Failed to load URDF: {urdf_path}")
+                    return None
                 
-            if not loader.load_urdf(urdf_path):
-                print(f"❌ Failed to load URDF: {urdf_path}")
-                return None
-            
-            # Get combined mesh
-            mesh = loader.get_combined_mesh(pv_module)
-            if mesh:
-                print(f"✅ Successfully created robot mesh from URDF (advanced loader): {urdf_path}")
-                return mesh
-            else:
-                print(f"⚠️  No meshes found in URDF file: {urdf_path}")
-                # Fallback: create geometric representation from URDF structure
-                return RobotMeshFactory._create_geometric_from_urdf(pv_module, loader)
-                
-        except Exception as e:
-            print(f"❌ Error loading URDF {urdf_path}: {e}")
-            return None
+                # Get combined mesh
+                mesh = loader.get_combined_mesh(pv_module)
+                if mesh:
+                    print(f"✅ Successfully created robot mesh from URDF (legacy loader): {urdf_path}")
+                    return mesh
+                else:
+                    print(f"⚠️  No meshes found in URDF file: {urdf_path}")
+                    # Fallback: create geometric representation from URDF structure
+                    return RobotMeshFactory._create_geometric_from_urdf(pv_module, loader)
+                    
+            except Exception as e:
+                print(f"❌ Legacy URDF loader error: {e}")
+        
+        print("❌ All URDF loaders failed. Install yourdfpy and trimesh.")
+        return None
     
     @staticmethod
     def _create_geometric_from_urdf(pv_module, loader: 'URDFLoader') -> Optional:

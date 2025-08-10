@@ -1,34 +1,48 @@
 # SimPyROS Core Requirements
-# Essential dependencies for running examples/
+# Essential dependencies for running examples/ and main code
 
-# Core simulation framework
-simpy>=4.0.0
+# ===== Core Simulation Framework =====
+simpy>=4.0.0              # Discrete event simulation engine
 
-# Numerical computing and transformations
-numpy>=1.20.0
-scipy>=1.7.0
+# ===== Numerical Computing =====
+numpy>=1.20.0             # Array operations and mathematical functions
+scipy>=1.7.0              # Scientific computing (spatial transformations)
 
-# Primary 3D visualization (PyVista examples - recommended)
-pyvista>=0.40.0
-vtk>=9.0.0
+# ===== 3D Visualization (Primary) =====
+pyvista>=0.40.0           # High-quality 3D visualization and mesh handling
+vtk>=9.0.0                # VTK backend for PyVista
 
-# Standard library modules used: math, time, sys, os, traceback
-# These are built-in Python modules and don't need to be installed
+# ===== URDF Robot Model Support (Core) =====
+# Modern URDF parsing (primary, used by urdf_loader.py and robot.py)
+yourdfpy>=0.0.6           # Modern URDF parsing library (recommended)
 
-# Current examples dependencies:
-# - basic/basic_demo.py: Only uses core dependencies (already included)
-# - pyvista/*: Uses PyVista and core dependencies (already included)
+# Mesh processing and 3D model support
+trimesh>=3.15.0           # 3D mesh processing (for URDF mesh files)
 
-# Legacy examples (in legacy/ directory) require additional dependencies
-# but are not included here to keep main installation minimal:
-# matplotlib>=3.5.0  # For legacy/examples/visualization_demo.py
+# ===== Development and Testing =====
+# Optional but useful for development
+matplotlib>=3.5.0         # For legacy examples and plotting (optional)
 
-# Development/Optional dependencies:
-# pandas>=1.3.0      # For advanced data analysis
-# pyyaml>=6.0        # For configuration files
-# h5py>=3.0.0        # For HDF5 data storage
+# ===== Optional Advanced Features =====
+# Uncomment these for advanced functionality:
+# pandas>=1.3.0           # Data analysis and CSV export
+# pillow>=8.0.0           # Image processing for screenshots
+# h5py>=3.0.0             # HDF5 data storage
+# opencv-python>=4.5.0    # Computer vision features
+# robotics-toolbox-python>=0.11.0  # Advanced robotics algorithms
 
-# URDF/Robot model support (added 2025-08-09)
-urdfpy>=0.0.22     # URDF parsing and visualization
-trimesh>=3.15.0    # 3D mesh processing and loading
-pycollada>=0.7.0   # COLLADA/DAE mesh file support
+# ===== Notes =====
+# Standard library modules used (built-in, no installation needed):
+# - math, time, sys, os, pathlib, json, threading
+# - typing, dataclasses, enum, warnings, traceback
+# - xml.etree.ElementTree (for XML parsing)
+#
+# Current examples coverage:
+# - examples/basic/*: Core dependencies only
+# - examples/pyvista/*: All main dependencies (recommended entry point)  
+# - examples/robot_demo.py: Full robot functionality with URDF support
+# - tests/*: Core dependencies for testing
+#
+# Legacy compatibility:
+# - legacy/* folder: May require matplotlib and other optional dependencies
+# - unused/* folder: Not maintained, dependencies not guaranteed

@@ -12,7 +12,7 @@ from enum import Enum
 import warnings
 
 from simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
-from advanced_urdf_loader import AdvancedURDFLoader, AdvancedLink, AdvancedJoint
+from urdf_loader import URDFLoader, URDFLink, URDFJoint
 from scipy.spatial.transform import Rotation
 
 
@@ -66,7 +66,7 @@ class JointCommand:
 class Joint:
     """Individual joint representation with control capabilities"""
     
-    def __init__(self, joint_info: AdvancedJoint):
+    def __init__(self, joint_info: URDFJoint):
         self.name = joint_info.name
         self.joint_type = JointType(joint_info.joint_type) if joint_info.joint_type in [jt.value for jt in JointType] else JointType.FIXED
         self.parent_link = joint_info.parent_link
@@ -179,7 +179,7 @@ class Joint:
 class Link:
     """Robot link representation"""
     
-    def __init__(self, link_info: AdvancedLink):
+    def __init__(self, link_info: URDFLink):
         self.name = link_info.name
         self.geometry_type = link_info.geometry_type
         self.geometry_params = link_info.geometry_params.copy()
@@ -222,7 +222,7 @@ class Robot(SimulationObject):
         self.robot_parameters = parameters
         
         # URDF and robot structure
-        self.urdf_loader: Optional[AdvancedURDFLoader] = None
+        self.urdf_loader: Optional[URDFLoader] = None
         self.links: Dict[str, Link] = {}
         self.joints: Dict[str, Joint] = {}
         self.joint_names: List[str] = []
@@ -244,7 +244,7 @@ class Robot(SimulationObject):
     def _load_urdf(self) -> bool:
         """Load robot from URDF file"""
         try:
-            self.urdf_loader = AdvancedURDFLoader()
+            self.urdf_loader = URDFLoader()
             
             if not self.urdf_loader.is_available():
                 raise RuntimeError("URDF loader not available")

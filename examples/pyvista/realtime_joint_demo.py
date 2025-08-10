@@ -18,7 +18,7 @@ import simpy
 from robot import create_robot_from_urdf
 from simulation_object import Pose
 from pyvista_visualizer import PyVistaVisualizer
-from advanced_urdf_loader import AdvancedURDFLoader
+from urdf_loader import URDFLoader
 
 
 class RealTimeJointVisualizer:
@@ -36,7 +36,7 @@ class RealTimeJointVisualizer:
         self.robot = robot
         
         # URDF loader setup
-        self.urdf_loader = AdvancedURDFLoader()
+        self.urdf_loader = URDFLoader()
         if not self.urdf_loader.load_urdf(urdf_path):
             print("❌ Failed to load URDF for visualization")
             return False
