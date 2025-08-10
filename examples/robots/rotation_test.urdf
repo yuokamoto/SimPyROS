@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<robot name="rotation_test">
+  
+  <!-- Base Link -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="1.0 0.5 0.3"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.7 0.7 0.7 1.0"/>
+      </material>
+    </visual>
+  </link>
+  
+  <!-- Vertical cylinder (no rotation) -->
+  <link name="vertical_cylinder">
+    <visual>
+      <geometry>
+        <cylinder radius="0.2" length="0.8"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+  
+  <!-- Horizontal cylinder (90° X rotation) -->
+  <link name="horizontal_cylinder">
+    <visual>
+      <geometry>
+        <cylinder radius="0.2" length="0.8"/>
+      </geometry>
+      <material name="red">
+        <color rgba="1.0 0.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+  
+  <!-- Side cylinder (90° Y rotation) -->
+  <link name="side_cylinder">
+    <visual>
+      <geometry>
+        <cylinder radius="0.2" length="0.8"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0.0 1.0 0.0 1.0"/>
+      </material>
+    </visual>
+  </link>
+  
+  <!-- Joints -->
+  <!-- No rotation - should be vertical (Z-axis) -->
+  <joint name="base_to_vertical" type="fixed">
+    <parent link="base_link"/>
+    <child link="vertical_cylinder"/>
+    <origin xyz="0 0 0.6" rpy="0 0 0"/>
+  </joint>
+  
+  <!-- 90° X rotation - should be horizontal (Y-axis) -->
+  <joint name="base_to_horizontal" type="fixed">
+    <parent link="base_link"/>
+    <child link="horizontal_cylinder"/>
+    <origin xyz="0.8 0 0.15" rpy="1.5708 0 0"/>
+  </joint>
+  
+  <!-- 90° Y rotation - should be sideways (X-axis) -->
+  <joint name="base_to_side" type="fixed">
+    <parent link="base_link"/>
+    <child link="side_cylinder"/>
+    <origin xyz="-0.8 0 0.15" rpy="0 1.5708 0"/>
+  </joint>
+  
+</robot>

@@ -27,3 +27,8 @@ vtk>=9.0.0
 # pandas>=1.3.0      # For advanced data analysis
 # pyyaml>=6.0        # For configuration files
 # h5py>=3.0.0        # For HDF5 data storage
+
+# URDF/Robot model support (added 2025-08-09)
+urdfpy>=0.0.22     # URDF parsing and visualization
+trimesh>=3.15.0    # 3D mesh processing and loading
+pycollada>=0.7.0   # COLLADA/DAE mesh file support

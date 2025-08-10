@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
 PyVista Interactive Robot Demo
-Shows real-time robot visualization with PyVista
+Shows real-time robot visualization with PyVista using the shared visualizer module
+Now supports URDF robot loading!
+
+Usage:
+    python pyvista_robot_demo.py [duration]                    # Built-in wheeled robot
+    python pyvista_robot_demo.py [duration] [urdf_path]        # Load from URDF file
+    
+Examples:
+    python pyvista_robot_demo.py 10                                    # 10-second demo with built-in robot
+    python pyvista_robot_demo.py 15 ../robots/simple_robot.urdf        # Load simple robot URDF
+    python pyvista_robot_demo.py 20 ../robots/mobile_robot.urdf        # Load mobile robot URDF
 """
 
 import sys
@@ -11,84 +21,55 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import numpy as np
 import time
 import math
-
-# Configure PyVista for headless operation BEFORE import
-os.environ['PYVISTA_OFF_SCREEN'] = 'false'  # Enable interactive display
-os.environ['PYVISTA_USE_PANEL'] = 'false'
-
-import pyvista as pv
 from simulation_object import Pose
+from pyvista_visualizer import create_interactive_visualizer, setup_basic_scene, create_robot_mesh, AnimationController
 
-def create_robot_mesh():
-    """Create a detailed robot mesh"""
-    # Robot base (main body)
-    base = pv.Box(bounds=[-0.5, 0.5, -0.3, 0.3, 0, 0.2])
-    
-    # Robot arm (articulated)
-    arm1 = pv.Cylinder(center=[0.3, 0, 0.4], direction=[0, 0, 1], 
-                      radius=0.1, height=0.6, resolution=16)
-    
-    # End effector
-    gripper = pv.Sphere(center=[0.3, 0, 0.8], radius=0.08, phi_resolution=16, theta_resolution=16)
-    
-    # Wheels
-    wheel_positions = [[-0.4, -0.35, -0.1], [-0.4, 0.35, -0.1], 
-                       [0.4, -0.35, -0.1], [0.4, 0.35, -0.1]]
-    wheels = []
-    for pos in wheel_positions:
-        wheel = pv.Cylinder(center=pos, direction=[0, 1, 0], 
-                           radius=0.12, height=0.05, resolution=12)
-        wheels.append(wheel)
-    
-    # Combine all parts
-    robot = base + arm1 + gripper
-    for wheel in wheels:
-        robot = robot + wheel
-        
-    return robot
-
-def interactive_demo(duration_seconds=10):
-    """Run interactive PyVista demo"""
+def interactive_demo(duration_seconds=10, urdf_path=None):
+    """Run interactive PyVista demo using the shared visualizer with optional URDF support"""
     print(f"Starting {duration_seconds}s interactive PyVista demo...")
+    if urdf_path:
+        print(f"URDF file: {urdf_path}")
+    else:
+        print("Using built-in wheeled robot")
     
-    # Create plotter
-    plotter = pv.Plotter(window_size=(1200, 800))
-    plotter.set_background('lightblue')
+    # Create visualizer
+    viz = create_interactive_visualizer()
+    if not viz.available:
+        print("PyVista not available - demo cannot run")
+        return 0
     
-    # Create ground plane
-    ground = pv.Plane(center=[0, 0, -0.2], direction=[0, 0, 1], 
-                     i_size=10, j_size=10, i_resolution=20, j_resolution=20)
-    plotter.add_mesh(ground, color='lightgray', opacity=0.6)
+    # Setup basic scene
+    setup_basic_scene(viz)
     
-    # Add coordinate axes
-    axes_length = 1.5
-    x_axis = pv.Arrow(start=[0, 0, 0], direction=[1, 0, 0], scale=axes_length)
-    y_axis = pv.Arrow(start=[0, 0, 0], direction=[0, 1, 0], scale=axes_length)
-    z_axis = pv.Arrow(start=[0, 0, 0], direction=[0, 0, 1], scale=axes_length)
+    # Create animation controller
+    controller = AnimationController(viz.plotter, viz.pv)
     
-    plotter.add_mesh(x_axis, color='red')
-    plotter.add_mesh(y_axis, color='green') 
-    plotter.add_mesh(z_axis, color='blue')
+    # Create and add robot with URDF support
+    robot_mesh = None
+    if urdf_path and os.path.exists(urdf_path):
+        print(f"Loading robot from URDF: {urdf_path}")
+        robot_mesh = create_robot_mesh(viz, robot_type='urdf', urdf_path=urdf_path)
+        
+    # Fallback to built-in robot if URDF loading fails
+    if robot_mesh is None:
+        robot_type = 'wheeled'  # Default fallback
+        if urdf_path:
+            print("URDF loading failed, using built-in wheeled robot")
+        robot_mesh = create_robot_mesh(viz, robot_type)
     
-    # Create initial robot
-    robot = create_robot_mesh()
-    robot_actor = plotter.add_mesh(robot, color='orange', opacity=0.9)
-    
-    # Add trajectory trail
-    trajectory_points = []
-    
-    # Set camera
-    plotter.camera_position = [(6, 6, 4), (0, 0, 1), (0, 0, 1)]
+    if robot_mesh:
+        controller.add_robot("main_robot", robot_mesh)
+        print("Robot successfully added to visualization")
+    else:
+        print("Warning: Could not create robot mesh")
     
     # Animation parameters
     start_time = time.time()
     frame_count = 0
     
-    
-    # Set up animation callback
     def animate():
         """Animation callback function"""
-        nonlocal frame_count, robot_actor, trajectory_points, start_time
+        nonlocal frame_count, start_time
         
         current_time = time.time() - start_time
         
@@ -106,59 +87,58 @@ def interactive_demo(duration_seconds=10):
         # Create pose
         pose = Pose(x=x, y=y, z=z, yaw=yaw, pitch=pitch)
         
-        # Update robot position
-        new_robot = create_robot_mesh()
-        transform_matrix = pose.to_transformation_matrix()
-        new_robot.transform(transform_matrix, inplace=True)
+        # Update robot position (optimized - no mesh recreation)
+        controller.update_robot_pose("main_robot", pose)
         
-        # Remove old robot and add new one
-        plotter.remove_actor(robot_actor)
-        robot_actor = plotter.add_mesh(new_robot, color='orange', opacity=0.9)
-        
-        # Add to trajectory trail
-        trajectory_points.append([x, y, z])
-        if len(trajectory_points) > 50:  # Limit trail length
-            trajectory_points.pop(0)
-            
-        # Draw trajectory trail
-        if len(trajectory_points) > 2:
-            trail = pv.Spline(np.array(trajectory_points), n_points=100)
-            plotter.add_mesh(trail, color='yellow', line_width=3, name='trail')
+        # Add trajectory trail every few frames
+        if frame_count % 10 == 0:
+            controller.add_trajectory_trail("main_robot")
         
         frame_count += 1
         
-        # Update title with info
+        # Update display with info
         fps = frame_count / current_time if current_time > 0 else 0
-        plotter.add_text(f"Frame: {frame_count}, FPS: {fps:.1f}, Time: {current_time:.1f}s", 
-                        position='upper_left', font_size=12, name='info')
-        plotter.add_text(f"Robot Position: ({x:.1f}, {y:.1f}, {z:.1f})", 
-                        position='upper_right', font_size=10, name='pos')
+        viz.plotter.add_text(
+            f"Frame: {frame_count}, FPS: {fps:.1f}, Time: {current_time:.1f}s", 
+            position='upper_left', font_size=12, name='info'
+        )
+        viz.plotter.add_text(
+            f"Robot Position: ({x:.1f}, {y:.1f}, {z:.1f})", 
+            position='upper_right', font_size=10, name='pos'
+        )
     
     print("Interactive demo started - window should open")
     print("Close the window to end the demo")
     print("The robot will move in a figure-8 pattern")
     
     # Show the plot with animation
-    plotter.show(auto_close=False, interactive_update=True)
+    viz.plotter.show(auto_close=False, interactive_update=True)
     
     # Manual animation loop
     try:
         while time.time() - start_time < duration_seconds:
             animate()
-            plotter.update()
+            viz.plotter.update()
             time.sleep(0.05)  # 20 FPS
     except KeyboardInterrupt:
         print("\\nDemo interrupted by user")
     
-    plotter.close()
+    viz.plotter.close()
     
     print(f"Demo completed! Total frames: {frame_count}")
+    return frame_count
 
-def screenshot_demo():
-    """Create series of robot screenshots"""
+def screenshot_demo(urdf_path=None):
+    """Create series of robot screenshots using the shared visualizer with optional URDF support"""
     print("Creating robot screenshot series...")
+    if urdf_path:
+        print(f"Using URDF: {urdf_path}")
+    else:
+        print("Using built-in wheeled robot")
     
-    os.makedirs("output", exist_ok=True)
+    from pyvista_visualizer import create_headless_visualizer
+    
+    os.makedirs("../output", exist_ok=True)
     
     # Create poses for different robot configurations
     poses = []
@@ -171,57 +151,85 @@ def screenshot_demo():
         poses.append(Pose(x=x, y=y, z=z, yaw=yaw))
     
     for i, pose in enumerate(poses):
-        # Create off-screen plotter
-        plotter = pv.Plotter(off_screen=True, window_size=(1024, 768))
-        plotter.set_background('white')
+        # Create headless visualizer for each screenshot
+        viz = create_headless_visualizer()
+        if not viz.available:
+            print("PyVista not available for screenshots")
+            return
         
-        # Ground plane
-        ground = pv.Plane(center=[0, 0, -0.2], direction=[0, 0, 1], 
-                         i_size=8, j_size=8, i_resolution=16, j_resolution=16)
-        plotter.add_mesh(ground, color='lightgray', opacity=0.4)
+        # Setup scene
+        setup_basic_scene(viz)
         
-        # Create and transform robot
-        robot = create_robot_mesh()
-        transform_matrix = pose.to_transformation_matrix()
-        robot.transform(transform_matrix, inplace=True)
-        plotter.add_mesh(robot, color='blue', opacity=0.9)
+        # Create and transform robot with URDF support
+        robot = None
+        if urdf_path and os.path.exists(urdf_path):
+            robot = create_robot_mesh(viz, robot_type='urdf', urdf_path=urdf_path)
+        
+        # Fallback to built-in robot
+        if robot is None:
+            robot = create_robot_mesh(viz, 'wheeled')
+            
+        if robot:
+            transform_matrix = pose.to_transformation_matrix()
+            robot.transform(transform_matrix, inplace=True)
+            viz.plotter.add_mesh(robot, color='blue', opacity=0.9)
         
         # Add target marker
-        target = pv.Sphere(center=[0, 0, 1], radius=0.2, phi_resolution=12, theta_resolution=12)
-        plotter.add_mesh(target, color='red', opacity=0.7)
-        
-        # Set camera
-        plotter.camera_position = [(8, 8, 6), (0, 0, 1), (0, 0, 1)]
+        target = viz.pv.Sphere(center=[0, 0, 1], radius=0.2, phi_resolution=12, theta_resolution=12)
+        viz.plotter.add_mesh(target, color='red', opacity=0.7)
         
         # Save screenshot
-        filename = f"output/pyvista_robot_{i:02d}.png"
-        plotter.screenshot(filename)
-        plotter.close()
+        filename = f"../output/pyvista_robot_{i:02d}.png"
+        viz.plotter.screenshot(filename)
+        viz.plotter.close()
         
         print(f"Saved: {filename}")
     
     print(f"✅ Screenshot series complete! 8 images saved in output/")
 
 def main():
-    """Main demo selector"""
+    """Main demo selector with URDF support"""
     print("PyVista Robot Visualization Demo")
-    print("=" * 40)
+    print("Using shared visualizer module with URDF support")
+    print("=" * 50)
+    
+    # Parse command line arguments
+    duration = 10.0
+    urdf_path = None
     
     if len(sys.argv) > 1:
-        duration = float(sys.argv[1])
-    else:
-        duration = 10
+        try:
+            duration = float(sys.argv[1])
+        except ValueError:
+            print("Invalid duration, using default (10 seconds)")
+            duration = 10.0
     
-    print(f"Running interactive demo for {duration} seconds...")
+    if len(sys.argv) > 2:
+        urdf_path = sys.argv[2]
+        if not os.path.exists(urdf_path):
+            print(f"Warning: URDF file not found: {urdf_path}")
+            print("Will use built-in robot instead")
+            urdf_path = None
+    
+    # Display configuration
+    print(f"Duration: {duration} seconds")
+    if urdf_path:
+        print(f"URDF file: {urdf_path}")
+    else:
+        print("Robot: Built-in wheeled robot")
     print("Note: This will open a 3D visualization window")
+    print()
     
     try:
         # Try interactive demo first
-        interactive_demo(duration)
+        frames = interactive_demo(duration, urdf_path)
+        if frames == 0:
+            print("Interactive demo failed, trying screenshot demo...")
+            screenshot_demo(urdf_path)
     except Exception as e:
         print(f"Interactive demo failed: {e}")
         print("Falling back to screenshot demo...")
-        screenshot_demo()
+        screenshot_demo(urdf_path)
 
 if __name__ == "__main__":
     main()

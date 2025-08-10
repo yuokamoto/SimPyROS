@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Simple PyVista Demo for Robot Visualization
-Demonstrates basic PyVista functionality with fallback support
+Demonstrates basic PyVista functionality using the shared visualizer module
 """
 
 import sys
@@ -9,99 +9,51 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import numpy as np
-
-# Try to import PyVista with fallback
-try:
-    # Configure PyVista for headless operation BEFORE import
-    os.environ['PYVISTA_OFF_SCREEN'] = 'true'
-    os.environ['PYVISTA_USE_PANEL'] = 'false'
-    os.environ['VTK_SILENCE_GET_VOID_POINTER_WARNINGS'] = '1'
-    
-    # Check if display is available
-    display_available = bool(os.environ.get('DISPLAY', ''))
-    
-    import pyvista as pv
-    import vtk
-    
-    # Configure VTK for headless operation if no display
-    if not display_available:
-        # Use mesa software rendering
-        try:
-            vtk.vtkOpenGLRenderWindow.SetGlobalMaximumNumberOfMultiSamples(0)
-            pv.start_xvfb()  # Start virtual framebuffer if available
-        except:
-            pass
-    
-    # Force off-screen rendering for headless environments
-    pv.OFF_SCREEN = True
-    pv.set_plot_theme('document')
-    
-    PYVISTA_AVAILABLE = True
-    print(f"PyVista imported successfully (display_available: {display_available})")
-except ImportError as e:
-    PYVISTA_AVAILABLE = False
-    print(f"PyVista not available: {e}")
-except Exception as e:
-    PYVISTA_AVAILABLE = False
-    print(f"PyVista configuration error: {e}")
-
-from simulation_object import Pose
 import math
 import time
-
-
-def create_simple_robot_mesh():
-    """Create a simple robot mesh using basic PyVista shapes"""
-    if not PYVISTA_AVAILABLE:
-        return None
-        
-    try:
-        # Robot base (box)
-        base = pv.Box(bounds=[-0.5, 0.5, -0.3, 0.3, 0, 0.2])
-        
-        # Robot arm (cylinder)
-        arm = pv.Cylinder(center=[0.3, 0, 0.4], direction=[0, 0, 1], 
-                         radius=0.1, height=0.6)
-        
-        # End effector (sphere)
-        gripper = pv.Sphere(center=[0.3, 0, 0.8], radius=0.08)
-        
-        # Combine meshes
-        robot = base + arm + gripper
-        
-        print("Robot mesh created successfully")
-        return robot
-        
-    except Exception as e:
-        print(f"Error creating robot mesh: {e}")
-        return None
-
+from simulation_object import Pose
+from pyvista_visualizer import (
+    create_headless_visualizer, 
+    setup_basic_scene, 
+    create_robot_mesh, 
+    RobotMeshFactory
+)
 
 def demonstrate_mesh_creation():
-    """Demonstrate mesh creation without rendering"""
+    """Demonstrate mesh creation without rendering using the shared module"""
     print("\\n=== PyVista Mesh Creation Demo ===")
     
-    if not PYVISTA_AVAILABLE:
+    # Create a minimal visualizer just to access PyVista
+    viz = create_headless_visualizer()
+    if not viz.available:
         print("PyVista not available - skipping mesh demo")
         return False
         
     try:
         # Create basic shapes
         print("Creating basic shapes...")
-        sphere = pv.Sphere(radius=1.0)
+        sphere = viz.pv.Sphere(radius=1.0)
         print(f"Sphere: {sphere.n_points} points, {sphere.n_cells} cells")
         
-        box = pv.Box()
+        box = viz.pv.Box()
         print(f"Box: {box.n_points} points, {box.n_cells} cells")
         
-        cylinder = pv.Cylinder()
+        cylinder = viz.pv.Cylinder()
         print(f"Cylinder: {cylinder.n_points} points, {cylinder.n_cells} cells")
         
-        # Create robot mesh
-        print("\\nCreating robot mesh...")
-        robot = create_simple_robot_mesh()
-        if robot:
-            print(f"Robot mesh: {robot.n_points} points, {robot.n_cells} cells")
+        # Create robot meshes using factory
+        print("\\nCreating robot meshes...")
+        basic_robot = RobotMeshFactory.create_basic_robot(viz.pv)
+        if basic_robot:
+            print(f"Basic robot: {basic_robot.n_points} points, {basic_robot.n_cells} cells")
+            
+        wheeled_robot = RobotMeshFactory.create_wheeled_robot(viz.pv)
+        if wheeled_robot:
+            print(f"Wheeled robot: {wheeled_robot.n_points} points, {wheeled_robot.n_cells} cells")
+            
+        quadcopter = RobotMeshFactory.create_quadcopter(viz.pv)
+        if quadcopter:
+            print(f"Quadcopter: {quadcopter.n_points} points, {quadcopter.n_cells} cells")
             
         # Test transformations
         print("\\nTesting transformations...")
@@ -109,8 +61,8 @@ def demonstrate_mesh_creation():
         transform_matrix = pose.to_transformation_matrix()
         print(f"Transform matrix shape: {transform_matrix.shape}")
         
-        if robot:
-            transformed_robot = robot.copy()
+        if basic_robot:
+            transformed_robot = basic_robot.copy()
             transformed_robot.transform(transform_matrix, inplace=True)
             print("Robot transformation successful")
             
@@ -121,42 +73,32 @@ def demonstrate_mesh_creation():
         print(f"❌ Mesh demo error: {e}")
         return False
 
-
 def test_headless_rendering():
-    """Test headless rendering with screenshot"""
+    """Test headless rendering with screenshot using the shared module"""
     print("\\n=== PyVista Headless Rendering Test ===")
     
-    if not PYVISTA_AVAILABLE:
+    viz = create_headless_visualizer()
+    if not viz.available:
         print("PyVista not available - skipping rendering test")
         return False
         
     try:
-        # Ensure off-screen rendering
-        pv.OFF_SCREEN = True
+        print("Creating headless scene...")
         
-        # Create plotter with off-screen rendering
-        print("Creating off-screen plotter...")
-        plotter = pv.Plotter(off_screen=True, window_size=(800, 600))
-        plotter.set_background('white')
+        # Setup basic scene
+        setup_basic_scene(viz)
         
         # Create and add robot
-        robot = create_simple_robot_mesh()
+        robot = create_robot_mesh(viz, 'basic')
         if robot:
-            plotter.add_mesh(robot, color='blue', opacity=0.8)
-            print("Robot mesh added to plotter")
-        
-        # Add coordinate axes
-        axes = pv.Arrow(start=[0, 0, 0], direction=[1, 0, 0], scale=1.0)
-        plotter.add_mesh(axes, color='red')
-        
-        # Set camera position
-        plotter.camera_position = [(3, 3, 3), (0, 0, 0.5), (0, 0, 1)]
+            viz.plotter.add_mesh(robot, color='blue', opacity=0.8)
+            print("Robot mesh added to scene")
         
         # Save screenshot
-        os.makedirs("output", exist_ok=True)
-        screenshot_path = "output/pyvista_test.png"
-        plotter.screenshot(screenshot_path)
-        plotter.close()
+        os.makedirs("../output", exist_ok=True)
+        screenshot_path = "../output/pyvista_test.png"
+        viz.plotter.screenshot(screenshot_path)
+        viz.plotter.close()
         
         print(f"✅ Screenshot saved: {screenshot_path}")
         return True
@@ -164,7 +106,6 @@ def test_headless_rendering():
     except Exception as e:
         print(f"❌ Headless rendering error: {e}")
         return False
-
 
 def robot_animation_poses():
     """Generate poses for robot animation"""
@@ -178,48 +119,46 @@ def robot_animation_poses():
         poses.append(Pose(x=x, y=y, z=z, yaw=yaw))
     return poses
 
-
 def test_animation_sequence():
-    """Test animation sequence by creating multiple screenshots"""
+    """Test animation sequence by creating multiple screenshots using shared module"""
     print("\\n=== PyVista Animation Sequence Test ===")
     
-    if not PYVISTA_AVAILABLE:
+    # Test if visualizer is available
+    test_viz = create_headless_visualizer()
+    if not test_viz.available:
         print("PyVista not available - skipping animation test")
+        test_viz.plotter.close()
         return False
+    test_viz.plotter.close()
         
     try:
-        # Ensure off-screen rendering
-        pv.OFF_SCREEN = True
-        
-        os.makedirs("output", exist_ok=True)
+        os.makedirs("../output", exist_ok=True)
         poses = robot_animation_poses()
         
         print(f"Creating {len(poses)} animation frames...")
         
         for i, pose in enumerate(poses):
-            # Create plotter for each frame
-            plotter = pv.Plotter(off_screen=True, window_size=(800, 600))
-            plotter.set_background('white')
+            # Create new visualizer for each frame
+            viz = create_headless_visualizer()
+            
+            # Setup scene
+            setup_basic_scene(viz)
             
             # Create robot at specific pose
-            robot = create_simple_robot_mesh()
+            robot = create_robot_mesh(viz, 'wheeled')
             if robot:
                 transform_matrix = pose.to_transformation_matrix()
                 robot.transform(transform_matrix, inplace=True)
-                plotter.add_mesh(robot, color='blue', opacity=0.8)
+                viz.plotter.add_mesh(robot, color='blue', opacity=0.8)
             
-            # Add ground plane
-            ground = pv.Plane(center=[0, 0, -0.1], direction=[0, 0, 1], 
-                             i_size=8, j_size=8)
-            plotter.add_mesh(ground, color='lightgray', opacity=0.5)
-            
-            # Set camera
-            plotter.camera_position = [(6, 6, 4), (0, 0, 1), (0, 0, 1)]
+            # Add target marker
+            target = viz.pv.Sphere(center=[0, 0, 1], radius=0.2, phi_resolution=12, theta_resolution=12)
+            viz.plotter.add_mesh(target, color='red', opacity=0.7)
             
             # Save frame
-            frame_path = f"output/pyvista_frame_{i:03d}.png"
-            plotter.screenshot(frame_path)
-            plotter.close()
+            frame_path = f"../output/pyvista_frame_{i:03d}.png"
+            viz.plotter.screenshot(frame_path)
+            viz.plotter.close()
             
             print(f"Frame {i+1}/{len(poses)} saved")
             
@@ -230,14 +169,58 @@ def test_animation_sequence():
         print(f"❌ Animation sequence error: {e}")
         return False
 
+def test_robot_types():
+    """Test different robot types using the factory"""
+    print("\\n=== Robot Types Test ===")
+    
+    viz = create_headless_visualizer()
+    if not viz.available:
+        print("PyVista not available - skipping robot types test")
+        return False
+    
+    robot_types = ['basic', 'wheeled', 'quadcopter']
+    
+    try:
+        os.makedirs("../output", exist_ok=True)
+        
+        for i, robot_type in enumerate(robot_types):
+            # Create new scene
+            viz_scene = create_headless_visualizer()
+            setup_basic_scene(viz_scene)
+            
+            # Create robot of specific type
+            robot = create_robot_mesh(viz_scene, robot_type)
+            if robot:
+                viz_scene.plotter.add_mesh(robot, color='green', opacity=0.9)
+                print(f"Created {robot_type} robot successfully")
+            else:
+                print(f"Failed to create {robot_type} robot")
+                continue
+            
+            # Save screenshot
+            filename = f"../output/pyvista_robot_type_{robot_type}.png"
+            viz_scene.plotter.screenshot(filename)
+            viz_scene.plotter.close()
+            
+            print(f"Saved: {filename}")
+        
+        viz.plotter.close()
+        print(f"✅ Robot types test complete!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Robot types test error: {e}")
+        viz.plotter.close()
+        return False
 
 def main():
-    """Main demo function"""
+    """Main demo function using the shared visualizer module"""
     print("PyVista Robot Visualization - Simple Demo")
+    print("Using shared pyvista_visualizer module")
     print("=" * 50)
     
     success_count = 0
-    total_tests = 3
+    total_tests = 4
     
     # Test 1: Mesh creation
     if demonstrate_mesh_creation():
@@ -251,6 +234,10 @@ def main():
     if test_animation_sequence():
         success_count += 1
     
+    # Test 4: Robot types
+    if test_robot_types():
+        success_count += 1
+    
     print("\\n" + "=" * 50)
     print(f"Demo Results: {success_count}/{total_tests} tests passed")
     
@@ -258,16 +245,16 @@ def main():
         print("🎉 All PyVista tests successful!")
         print("PyVista integration is working correctly.")
         print("\\nGenerated files:")
-        print("  - output/pyvista_test.png (single robot)")
-        print("  - output/pyvista_frame_*.png (animation sequence)")
+        print("  - ../output/pyvista_test.png (basic rendering)")
+        print("  - ../output/pyvista_frame_*.png (animation sequence)")
+        print("  - ../output/pyvista_robot_type_*.png (different robot types)")
     elif success_count > 0:
         print("⚠️ Partial success - some PyVista features working")
     else:
         print("❌ PyVista integration issues detected")
-        print("Consider using matplotlib visualization instead")
+        print("Check PyVista installation and dependencies")
         
     return success_count == total_tests
-
 
 if __name__ == "__main__":
     try:
