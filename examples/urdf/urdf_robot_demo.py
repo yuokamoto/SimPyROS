@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
 URDF Robot Demo for SimPyROS
-Demonstrates loading and visualizing robots from URDF files
+Focused demonstration of loading and visualizing robots from URDF files
+This demo requires a URDF file and demonstrates URDF-specific features
 
 Usage:
-    python examples/pyvista/urdf_robot_demo.py [duration] [urdf_path] [options]
+    python examples/pyvista/urdf_robot_demo.py <duration> <urdf_path> [options]
     
 Options:
     --headless           Force headless mode (no GUI window)  
-    --screenshots        Save screenshots to output/ directory
+    --screenshots        Save screenshots to ../../output/ directory
     
 Examples:
-    python examples/pyvista/urdf_robot_demo.py 5
-    python examples/pyvista/urdf_robot_demo.py 10 my_robot.urdf
-    python examples/pyvista/urdf_robot_demo.py 10 --headless
-    python examples/pyvista/urdf_robot_demo.py 5 --headless --screenshots
-    python examples/pyvista/urdf_robot_demo.py 15 my_robot.urdf --screenshots
+    python examples/pyvista/urdf_robot_demo.py 15 examples/robots/simple_robot.urdf
+    python examples/pyvista/urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf --headless
+    python examples/pyvista/urdf_robot_demo.py 5 examples/robots/rotation_test.urdf --screenshots
 """
 
 import sys
@@ -33,12 +32,6 @@ from pyvista_visualizer import (
     PyVistaVisualizer, create_interactive_visualizer, setup_basic_scene,
     create_robot_mesh, AnimationController
 )
-try:
-    from legacy.loaders.urdf_loader import create_simple_robot_urdf
-except ImportError:
-    # Fallback: create a simple test function
-    def create_simple_robot_urdf(filepath):
-        pass  # Function not needed for main functionality
 
 def print_urdf_info(urdf_path):
     """Print detailed URDF information for debugging"""
@@ -168,15 +161,15 @@ def robot_controller(env, robot, target, visualizer, animation_controller):
         yield env.timeout(dt)
 
 
-def setup_visualization(robot, target, urdf_path=None):
-    """Setup PyVista visualization"""
-    print("Setting up PyVista visualization...")
+def setup_urdf_visualization(robot, target, urdf_path):
+    """Setup PyVista visualization specifically for URDF robots"""
+    print(f"Setting up URDF robot visualization: {os.path.basename(urdf_path)}")
     
     # Create visualizer
     visualizer = create_interactive_visualizer()
     
     if not visualizer.available:
-        print("PyVista not available, running simulation without visualization")
+        print("❌ PyVista not available")
         return visualizer, None
     
     # Setup basic scene
@@ -185,79 +178,41 @@ def setup_visualization(robot, target, urdf_path=None):
     # Create animation controller
     animation_controller = AnimationController(visualizer.plotter, visualizer.pv)
     
-    # Create robot mesh
-    robot_mesh = None
-    if urdf_path and os.path.exists(urdf_path):
-        print(f"🔄 Loading robot from URDF: {urdf_path}")
-        robot_mesh = create_robot_mesh(visualizer, robot_type='urdf', urdf_path=urdf_path)
-        if robot_mesh:
-            print(f"✅ Successfully created robot mesh from URDF")
-        else:
-            print(f"❌ Failed to create robot mesh from URDF")
-        
-    # Fallback to built-in mesh if URDF loading fails
-    if robot_mesh is None:
-        print("🔄 URDF loading failed or not available, using built-in wheeled robot mesh")
-        robot_mesh = create_robot_mesh(visualizer, robot_type='wheeled')
-        if robot_mesh:
-            print("✅ Built-in wheeled robot mesh created successfully")
+    # Load robot from URDF
+    print(f"🔄 Loading robot from URDF: {urdf_path}")
+    robot_mesh = create_robot_mesh(visualizer, robot_type='urdf', urdf_path=urdf_path)
     
-    if robot_mesh:
-        # Add robot to animation controller
-        animation_controller.add_robot("robot", robot_mesh, color='orange', opacity=0.8)
-        print("Robot mesh successfully added to visualization")
-    else:
-        print("Warning: Could not create any robot mesh")
+    if robot_mesh is None:
+        print("❌ Failed to create robot mesh from URDF")
+        return visualizer, None
+    
+    print(f"✅ Successfully loaded URDF robot: {os.path.basename(urdf_path)}")
+    
+    # Add robot to animation controller
+    animation_controller.add_robot("robot", robot_mesh, color='orange', opacity=0.8)
+    print("Robot mesh successfully added to visualization")
     
     # Add target as a simple sphere
     target_mesh = visualizer.pv.Sphere(center=target.pose.position, radius=0.15)
     visualizer.plotter.add_mesh(target_mesh, color='red', opacity=0.7)
     
-    # Add detailed status information
-    urdf_status = "❌ Not loaded"
-    robot_info = "Built-in wheeled robot (fallback)"
+    # Display URDF information
+    try:
+        from urdf_loader import URDFLoader
+        loader = URDFLoader()
+        if loader.load_urdf(urdf_path):
+            urdf_info = f"Links: {len(loader.links)}, Joints: {len(loader.joints)}"
+        else:
+            urdf_info = "URDF parsing incomplete"
+    except Exception:
+        urdf_info = "URDF info unavailable"
     
-    if urdf_path and os.path.exists(urdf_path):
-        # Try simple URDF loader first
-        try:
-            from simple_urdf_loader import SimpleURDFLoader
-            simple_loader = SimpleURDFLoader()
-            if simple_loader.load_urdf(urdf_path):
-                urdf_status = "✅ Successfully loaded (Simple Parser)"
-                robot_info = f"URDF: {os.path.basename(urdf_path)}"
-                robot_info += f" ({len(simple_loader.links)} links, {len(simple_loader.joints)} joints)"
-            else:
-                urdf_status = "⚠️ Simple loader failed"
-                robot_info = "Trying advanced loader..."
-        except Exception as e:
-            urdf_status = "❌ Simple loader error"
-            robot_info = f"Simple loader error: {e}"
-        
-        # Fallback to advanced URDF loader if simple failed
-        if "failed" in urdf_status or "error" in urdf_status:
-            try:
-                from urdf_loader import URDFLoader
-                loader = URDFLoader()
-                if loader.is_available():
-                    if loader.load_urdf(urdf_path):
-                        urdf_status = "✅ Successfully loaded (Advanced Parser)"
-                        robot_info = f"URDF: {os.path.basename(urdf_path)}"
-                        robot_info += f" ({len(loader.links)} links, {len(loader.joints)} joints)"
-                    else:
-                        urdf_status = "⚠️ Advanced load failed"
-                        robot_info = "Built-in robot (URDF parsing error)"
-                else:
-                    urdf_status = "⚠️ Dependencies missing"
-                    robot_info = "Built-in robot (urdfpy/trimesh not available)"
-            except Exception as e:
-                urdf_status = "❌ All loaders failed"
-                robot_info = f"Built-in robot (loader error: {e})"
-    
+    # Add status information
     info_text = (
         "SimPyROS URDF Robot Demo\n"
         "Controls: Left-drag=rotate, Right-drag=zoom, Middle-drag=pan\n"
-        f"URDF Status: {urdf_status}\n"
-        f"Robot: {robot_info}"
+        f"URDF: {os.path.basename(urdf_path)}\n"
+        f"Details: {urdf_info}"
     )
     visualizer.plotter.add_text(info_text, position='upper_left', font_size=10, name='main_info')
     
@@ -275,12 +230,15 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
         if os.path.exists(urdf_path):
             print(f"URDF absolute path: {os.path.abspath(urdf_path)}")
     
-    # Create test URDF if none provided
+    # Validate URDF path is provided
     if not urdf_path:
-        print("No URDF path provided - creating test URDF file...")
-        urdf_path = "test_robot.urdf"
-        create_simple_robot_urdf(urdf_path)
-        print(f"Test URDF created: {urdf_path}")
+        print("❌ Error: URDF path is required")
+        print("Usage: python urdf_robot_demo.py <duration> <urdf_path> [options]")
+        print("Available URDF files:")
+        print("  examples/robots/simple_robot.urdf")
+        print("  examples/robots/mobile_robot.urdf") 
+        print("  examples/robots/rotation_test.urdf")
+        return 1
     
     # Print detailed URDF information
     print_urdf_info(urdf_path)
@@ -288,8 +246,13 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
     # Create simulation
     env, robot, target = create_simulation_environment()
     
-    # Setup visualization
-    visualizer, animation_controller = setup_visualization(robot, target, urdf_path)
+    # Setup URDF visualization
+    visualizer, animation_controller = setup_urdf_visualization(robot, target, urdf_path)
+    
+    # Check if visualization setup failed
+    if animation_controller is None:
+        print("❌ Failed to setup robot visualization")
+        return 1
     
     # Start robot controller process
     env.process(robot_controller(env, robot, target, visualizer, animation_controller))
@@ -335,7 +298,7 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
                     info_text = (
                         f"URDF Demo - Frame: {frame_count}\n"
                         f"Time: {current_time:.1f}/{duration:.1f}s\n"
-                        f"Robot: {'URDF loaded' if urdf_path and os.path.exists(urdf_path) else 'Built-in fallback'}\n"
+                        f"Robot: {os.path.basename(urdf_path)}\n"
                         f"Pos: ({robot.pose.x:.1f}, {robot.pose.y:.1f}, {robot.pose.z:.1f})"
                     )
                     visualizer.plotter.add_text(info_text, position='upper_left', font_size=10, name='info')
@@ -374,18 +337,18 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
                 # Setup screenshots if requested
                 if save_screenshots:
                     # Ensure output directory exists
-                    os.makedirs("output", exist_ok=True)
+                    os.makedirs("../../output", exist_ok=True)
                     
                     # Capture initial frame
                     try:
-                        visualizer.plotter.screenshot(filename="output/urdf_demo_start.png")
-                        print("Initial screenshot saved to output/urdf_demo_start.png")
+                        visualizer.plotter.screenshot(filename="../../output/urdf_demo_start.png")
+                        print("Initial screenshot saved to ../../output/urdf_demo_start.png")
                     except Exception as e:
                         print(f"Screenshot failed: {e}")
                         # Fallback: setup off_screen mode properly
                         visualizer.plotter.show(auto_close=False, interactive=False, window_size=(800, 600))
-                        visualizer.plotter.screenshot(filename="output/urdf_demo_start.png")
-                        print("Initial screenshot saved to output/urdf_demo_start.png")
+                        visualizer.plotter.screenshot(filename="../../output/urdf_demo_start.png")
+                        print("Initial screenshot saved to ../../output/urdf_demo_start.png")
                 
                 # Run simulation step by step
                 dt = 0.1
@@ -401,7 +364,7 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
                         
                         # Save screenshots if requested
                         if save_screenshots and step % 10 == 0:  # Every 1 second
-                            screenshot_name = f"output/urdf_demo_step_{step:03d}.png"
+                            screenshot_name = f"../../output/urdf_demo_step_{step:03d}.png"
                             try:
                                 visualizer.plotter.screenshot(filename=screenshot_name)
                                 print(f"Screenshot saved: {screenshot_name}")
@@ -411,8 +374,8 @@ def run_demo(duration=10.0, urdf_path=None, force_headless=False, save_screensho
                 # Capture final frame if requested
                 if save_screenshots:
                     try:
-                        visualizer.plotter.screenshot(filename="output/urdf_demo_end.png")
-                        print("Final screenshot saved to output/urdf_demo_end.png")
+                        visualizer.plotter.screenshot(filename="../../output/urdf_demo_end.png")
+                        print("Final screenshot saved to ../../output/urdf_demo_end.png")
                     except Exception:
                         print("Final screenshot failed (headless mode issue)")
                 
@@ -466,11 +429,11 @@ def main():
                         urdf_path = alternative_path
                         print(f"Found URDF at: {urdf_path}")
                     else:
-                        print(f"URDF file not found at:")
+                        print(f"❌ URDF file not found at:")
                         print(f"  - {arg}")
                         print(f"  - {alternative_path}")
-                        print(f"Will use fallback test robot.")
-                        urdf_path = None
+                        print("Please provide a valid URDF file path.")
+                        return 1
         i += 1
     
     print("=" * 60)
@@ -479,10 +442,7 @@ def main():
     
     # Display usage information
     print(f"Duration: {duration} seconds")
-    if urdf_path:
-        print(f"URDF file: {urdf_path}")
-    else:
-        print("URDF file: Will create test URDF")
+    print(f"URDF file: {urdf_path}")
     
     # Display mode information
     if force_headless:
@@ -491,20 +451,19 @@ def main():
         print("Mode: Auto-detect (interactive if DISPLAY available)")
     
     if save_screenshots:
-        print("Screenshots: Enabled (saved to output/)")
+        print("Screenshots: Enabled (saved to ../../output/)")
     else:
         print("Screenshots: Disabled")
     
     print("\nUsage:")
-    print("  python urdf_robot_demo.py [duration] [urdf_path] [options]")
+    print("  python urdf_robot_demo.py <duration> <urdf_path> [options]")
     print("  Options:")
     print("    --headless           Force headless mode (no GUI window)")
-    print("    --screenshots        Save screenshots to output/ directory")
+    print("    --screenshots        Save screenshots to ../../output/ directory")
     print("  Examples:")
-    print("    python urdf_robot_demo.py 10")
-    print("    python urdf_robot_demo.py 15 my_robot.urdf")
-    print("    python urdf_robot_demo.py 10 --headless")
-    print("    python urdf_robot_demo.py 10 --headless --screenshots")
+    print("    python urdf_robot_demo.py 15 examples/robots/simple_robot.urdf")
+    print("    python urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf --headless")
+    print("    python urdf_robot_demo.py 10 examples/robots/rotation_test.urdf --screenshots")
     print("    python urdf_robot_demo.py 5 my_robot.urdf --screenshots")
     print()
     

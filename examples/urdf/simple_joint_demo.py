@@ -239,8 +239,8 @@ def simple_joint_demo():
             # Headless mode
             env.run(until=20.0)
             os.makedirs("output", exist_ok=True)
-            visualizer.plotter.screenshot("output/simple_joint_demo.png")
-            print("Screenshot saved: output/simple_joint_demo.png")
+            visualizer.plotter.screenshot("../../output/simple_joint_demo.png")
+            print("Screenshot saved: ../../output/simple_joint_demo.png")
         
     except Exception as e:
         print(f"❌ Error: {e}")

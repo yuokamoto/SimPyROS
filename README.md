@@ -63,7 +63,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Optional: Install legacy support (only if needed)
-# pip install -r requirements-legacy.txt
+# pip install -r legacy/requirements-legacy.txt
 ```
 
 #### Option 2: Using pyenv + pyenv-virtualenv
@@ -84,7 +84,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Optional: Install legacy support (only if needed)
-# pip install -r requirements-legacy.txt
+# pip install -r legacy/requirements-legacy.txt
 ```
 
 #### Option 3: Using conda/miniconda
@@ -113,7 +113,7 @@ python examples/basic/basic_demo.py
 python examples/pyvista/pyvista_simple_demo.py
 
 # Test URDF robot loading
-python examples/pyvista/urdf_robot_demo.py 5 examples/robots/simple_robot.urdf
+python examples/urdf/urdf_robot_demo.py 5 examples/robots/simple_robot.urdf
 ```
 
 ### Run Your First Simulation
@@ -121,11 +121,11 @@ python examples/pyvista/urdf_robot_demo.py 5 examples/robots/simple_robot.urdf
 # Learn the basics
 python examples/basic/basic_demo.py
 
-# Experience interactive 3D  
+# Experience interactive 3D with built-in robots
 python examples/pyvista/pyvista_robot_demo.py 5
 
 # Load and visualize URDF robots
-python examples/pyvista/urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf
+python examples/urdf/urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf
 ```
 
 ### Troubleshooting Installation
@@ -153,7 +153,7 @@ pip install trimesh networkx
 pip install -r requirements.txt
 
 # Only install legacy support if specifically needed
-# pip install -r requirements-legacy.txt
+# pip install -r legacy/requirements-legacy.txt
 ```
 
 **Headless Environment (no display):**
@@ -163,7 +163,7 @@ sudo apt-get install xvfb  # On Ubuntu/Debian
 pip install pyvista[headless]
 
 # Test headless mode
-python examples/pyvista/urdf_robot_demo.py 5 --headless
+python examples/urdf/urdf_robot_demo.py 5 --headless
 ```
 
 **Virtual Environment Issues:**
@@ -231,16 +231,18 @@ SimPyROS/
 ├── pyvista_visualizer.py      # 3D visualization system
 ├── urdf_loader.py             # URDF robot loading with colors
 ├── requirements.txt           # Core dependencies (recommended)
-├── requirements-legacy.txt    # Legacy/fallback dependencies (optional)
 ├── README.md                  # This file
 ├── examples/                  # Demonstrations
 │   ├── basic/                 # Basic learning demos
-│   ├── pyvista/              # Advanced 3D demos  
-│   └── robots/               # URDF robot models
+│   ├── pyvista/              # PyVista 3D visualization demos
+│   ├── urdf/                 # URDF robot loading and joint control demos
+│   ├── robot_demo.py         # Robot class fundamentals
+│   └── robots/               # URDF robot model files
 ├── legacy/                    # Deprecated/reference code
 │   ├── loaders/              # Old URDF loaders
 │   ├── debug/                # Development debugging scripts
 │   ├── examples/             # Legacy matplotlib demos
+│   ├── requirements-legacy.txt # Legacy/fallback dependencies (optional)
 │   └── backends/             # Alternative visualization backends
 ├── docs/                      # Documentation
 │   ├── CLAUDE.md             # Complete development history
@@ -273,13 +275,13 @@ python examples/basic/basic_demo.py
 python examples/pyvista/pyvista_robot_demo.py 10
 
 # Load custom URDF robot
-python examples/pyvista/urdf_robot_demo.py 15 examples/robots/simple_robot.urdf
+python examples/urdf/urdf_robot_demo.py 15 examples/robots/simple_robot.urdf
 
 # Headless mode without screenshots
-python examples/pyvista/urdf_robot_demo.py 10 --headless
+python examples/urdf/urdf_robot_demo.py 10 --headless
 
 # Headless mode with screenshot capture
-python examples/pyvista/urdf_robot_demo.py 10 --headless --screenshots
+python examples/urdf/urdf_robot_demo.py 10 --headless --screenshots
 ```
 
 ### Advanced Robot Control
@@ -297,13 +299,13 @@ python examples/pyvista/realtime_joint_demo.py 15
 ### Available Robot Models
 ```bash
 # Simple 3-link arm robot with colors
-python examples/pyvista/urdf_robot_demo.py 10 examples/robots/simple_robot.urdf
+python examples/urdf/urdf_robot_demo.py 10 examples/robots/simple_robot.urdf
 
 # Mobile robot with wheels and camera
-python examples/pyvista/urdf_robot_demo.py 15 examples/robots/mobile_robot.urdf  
+python examples/urdf/urdf_robot_demo.py 15 examples/robots/mobile_robot.urdf  
 
 # Multi-color rotation test robot
-python examples/pyvista/urdf_robot_demo.py 10 examples/robots/rotation_test.urdf
+python examples/urdf/urdf_robot_demo.py 10 examples/robots/rotation_test.urdf
 ```
 
 ## 🔧 Technical Features

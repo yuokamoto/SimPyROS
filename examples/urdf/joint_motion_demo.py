@@ -203,8 +203,8 @@ def joint_motion_demo(duration: float = 15.0):
             
             # Save screenshot
             os.makedirs("output", exist_ok=True)
-            visualizer.plotter.screenshot("output/joint_motion_demo.png")
-            print("Screenshot saved: output/joint_motion_demo.png")
+            visualizer.plotter.screenshot("../../output/joint_motion_demo.png")
+            print("Screenshot saved: ../../output/joint_motion_demo.png")
         
     except Exception as e:
         print(f"❌ Visualization error: {e}")

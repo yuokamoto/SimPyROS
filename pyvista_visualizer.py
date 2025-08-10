@@ -17,18 +17,6 @@ try:
 except ImportError:
     URDF_SUPPORT = False
 
-try:
-    from legacy.loaders.urdf_loader import URDFLoader as LegacyURDFLoader
-    LEGACY_URDF_SUPPORT = True
-except ImportError:
-    LEGACY_URDF_SUPPORT = False
-
-try:
-    from simple_urdf_loader import SimpleURDFLoader
-    SIMPLE_URDF_SUPPORT = True
-except ImportError:
-    SIMPLE_URDF_SUPPORT = False
-
 
 class PyVistaVisualizer:
     """
@@ -125,6 +113,11 @@ class PyVistaVisualizer:
         except Exception as e:
             print(f"Plotter creation error: {e}")
             self.available = False
+    
+    def __del__(self):
+        if self.plotter:
+            self.plotter.close()
+
 
 
 class RobotMeshFactory:
@@ -184,51 +177,6 @@ class RobotMeshFactory:
                     print("URDF loader: loading failed")
             except Exception as e:
                 print(f"URDF loader error: {e}")
-        
-        # Fallback to simple URDF loader (no heavy dependencies)
-        if SIMPLE_URDF_SUPPORT:
-            try:
-                print("Using simple URDF loader...")
-                simple_loader = SimpleURDFLoader()
-                if simple_loader.load_urdf(urdf_path):
-                    mesh = simple_loader.create_pyvista_mesh(pv_module)
-                    if mesh:
-                        print(f"✅ Successfully created robot mesh from URDF (simple loader): {urdf_path}")
-                        simple_loader.print_info()
-                        return mesh
-                    else:
-                        print("⚠️  Simple loader: No mesh created")
-            except Exception as e:
-                print(f"Simple URDF loader failed: {e}")
-        
-        # Fallback to legacy URDF loader
-        if LEGACY_URDF_SUPPORT:
-            try:
-                print("Trying legacy URDF loader...")
-                loader = LegacyURDFLoader(package_path=package_path)
-                if not loader.is_available():
-                    print("❌ Legacy URDF loader dependencies not available")
-                    return None
-                    
-                if not loader.load_urdf(urdf_path):
-                    print(f"❌ Failed to load URDF: {urdf_path}")
-                    return None
-                
-                # Get combined mesh
-                mesh = loader.get_combined_mesh(pv_module)
-                if mesh:
-                    print(f"✅ Successfully created robot mesh from URDF (legacy loader): {urdf_path}")
-                    return mesh
-                else:
-                    print(f"⚠️  No meshes found in URDF file: {urdf_path}")
-                    # Fallback: create geometric representation from URDF structure
-                    return RobotMeshFactory._create_geometric_from_urdf(pv_module, loader)
-                    
-            except Exception as e:
-                print(f"❌ Legacy URDF loader error: {e}")
-        
-        print("❌ All URDF loaders failed. Install yourdfpy and trimesh.")
-        return None
     
     @staticmethod
     def _create_geometric_from_urdf(pv_module, loader: 'URDFLoader') -> Optional:
@@ -309,129 +257,6 @@ class RobotMeshFactory:
         except:
             return None
     
-    @staticmethod
-    def create_basic_robot(pv_module) -> Optional:
-        """Create a basic robot with base, arm, and gripper"""
-        try:
-            # Robot base (box)
-            base = pv_module.Box(bounds=[-0.5, 0.5, -0.3, 0.3, 0, 0.2])
-            
-            # Robot arm (cylinder)
-            arm = pv_module.Cylinder(
-                center=[0.3, 0, 0.4], 
-                direction=[0, 0, 1], 
-                radius=0.1, 
-                height=0.6,
-                resolution=16
-            )
-            
-            # End effector (sphere)
-            gripper = pv_module.Sphere(
-                center=[0.3, 0, 0.8], 
-                radius=0.08,
-                phi_resolution=16, 
-                theta_resolution=16
-            )
-            
-            # Combine meshes
-            robot = base + arm + gripper
-            return robot
-            
-        except Exception as e:
-            print(f"Error creating basic robot mesh: {e}")
-            return None
-            
-    @staticmethod
-    def create_wheeled_robot(pv_module) -> Optional:
-        """Create a wheeled robot (like a mobile base)"""
-        try:
-            # Robot base
-            base = pv_module.Box(bounds=[-0.5, 0.5, -0.3, 0.3, 0, 0.2])
-            
-            # Robot arm
-            arm = pv_module.Cylinder(
-                center=[0.3, 0, 0.4], 
-                direction=[0, 0, 1], 
-                radius=0.1, 
-                height=0.6,
-                resolution=16
-            )
-            
-            # End effector
-            gripper = pv_module.Sphere(
-                center=[0.3, 0, 0.8], 
-                radius=0.08,
-                phi_resolution=16, 
-                theta_resolution=16
-            )
-            
-            # Wheels
-            wheel_positions = [[-0.4, -0.35, -0.1], [-0.4, 0.35, -0.1], 
-                             [0.4, -0.35, -0.1], [0.4, 0.35, -0.1]]
-            wheels = []
-            for pos in wheel_positions:
-                wheel = pv_module.Cylinder(
-                    center=pos, 
-                    direction=[0, 1, 0], 
-                    radius=0.12, 
-                    height=0.05, 
-                    resolution=12
-                )
-                wheels.append(wheel)
-            
-            # Combine all parts
-            robot = base + arm + gripper
-            for wheel in wheels:
-                robot = robot + wheel
-                
-            return robot
-            
-        except Exception as e:
-            print(f"Error creating wheeled robot mesh: {e}")
-            return None
-            
-    @staticmethod
-    def create_quadcopter(pv_module) -> Optional:
-        """Create a quadcopter mesh"""
-        try:
-            # Center body
-            center = pv_module.Sphere(
-                center=[0, 0, 0], 
-                radius=0.05, 
-                phi_resolution=10, 
-                theta_resolution=10
-            )
-            
-            # Propeller arms and props
-            arms = []
-            for angle in [0, 90, 180, 270]:
-                rad = math.radians(angle)
-                arm_end = [0.2 * math.cos(rad), 0.2 * math.sin(rad), 0]
-                
-                arm = pv_module.Cylinder(
-                    center=[arm_end[0]/2, arm_end[1]/2, 0], 
-                    direction=arm_end, 
-                    radius=0.01, 
-                    height=0.2, 
-                    resolution=6
-                )
-                prop = pv_module.Cylinder(
-                    center=arm_end, 
-                    direction=[0, 0, 1], 
-                    radius=0.05, 
-                    height=0.005, 
-                    resolution=8
-                )
-                arms.append(arm + prop)
-            
-            result = center
-            for arm in arms:
-                result = result + arm
-            return result
-            
-        except Exception as e:
-            print(f"Error creating quadcopter mesh: {e}")
-            return None
 
 
 class SceneBuilder:
@@ -669,51 +494,6 @@ class AnimationController:
         """Update robot pose - optimized version that doesn't recreate meshes"""
         # Use the efficient method by default
         return self.update_robot_pose_efficient(name, pose)
-    
-    def update_robot_pose_fallback(self, name: str, pose, mesh_creator_func):
-        """Fallback method for complex updates that require mesh recreation"""
-        if name not in self.actors:
-            return False
-            
-        try:
-            # Create new mesh at updated pose (only when necessary)
-            new_mesh = mesh_creator_func()
-            if new_mesh is None:
-                return False
-                
-            # Transform mesh to new pose
-            transform_matrix = pose.to_transformation_matrix()
-            new_mesh.transform(transform_matrix, inplace=True)
-            
-            # Remove old actor and add new one
-            if self.actors[name]:
-                self.plotter.remove_actor(self.actors[name])
-            
-            # Get original properties
-            props = self.robot_properties.get(name, {'color': 'orange', 'opacity': 0.9})
-            
-            actor = self.plotter.add_mesh(new_mesh, 
-                                        color=props['color'], 
-                                        opacity=props['opacity'], 
-                                        name=name)
-            self.actors[name] = actor
-            
-            # Update stored mesh
-            self.original_meshes[name] = mesh_creator_func()
-            
-            # Update trajectory
-            pos = pose.position
-            self.trajectories[name].append([pos[0], pos[1], pos[2]])
-            
-            # Limit trajectory length
-            if len(self.trajectories[name]) > 100:
-                self.trajectories[name].pop(0)
-                
-            return True
-            
-        except Exception as e:
-            print(f"Error updating robot {name}: {e}")
-            return False
             
     def add_trajectory_trail(self, name: str, 
                            color: str = 'yellow', 
@@ -756,44 +536,12 @@ def setup_basic_scene(visualizer: PyVistaVisualizer) -> bool:
     return success
 
 
-# Example robot creation functions using the factory
-def create_robot_mesh(visualizer: PyVistaVisualizer, robot_type: str = 'basic', urdf_path: str = None, package_path: str = None):
-    """
-    Create a robot mesh using the factory
-    
-    Args:
-        visualizer: PyVista visualizer instance
-        robot_type: Type of robot ('basic', 'wheeled', 'quadcopter', 'urdf')
-        urdf_path: Path to URDF file (required if robot_type='urdf')
-        package_path: Optional ROS package path for resolving package:// URIs
-    """
+# Robot mesh creation function
+def create_robot_mesh_from_urdf(visualizer: PyVistaVisualizer, urdf_path: str = None, package_path: str = None):
     if not visualizer.available:
         return None
         
-    if robot_type == 'urdf':
-        if not urdf_path:
-            print("URDF path required for robot_type='urdf'")
-            return None
-        return RobotMeshFactory.create_from_urdf(visualizer.pv, urdf_path, package_path)
-    elif robot_type == 'basic':
-        return RobotMeshFactory.create_basic_robot(visualizer.pv)
-    elif robot_type == 'wheeled':
-        return RobotMeshFactory.create_wheeled_robot(visualizer.pv)
-    elif robot_type == 'quadcopter':
-        return RobotMeshFactory.create_quadcopter(visualizer.pv)
-    else:
-        return RobotMeshFactory.create_basic_robot(visualizer.pv)
-
-
-if __name__ == "__main__":
-    # Simple test
-    viz = create_interactive_visualizer()
-    if viz.available:
-        setup_basic_scene(viz)
-        robot = create_robot_mesh(viz, 'wheeled')
-        if robot:
-            viz.plotter.add_mesh(robot, color='orange')
-        print("Test visualization created. Close window to exit.")
-        viz.plotter.show()
-    else:
-        print("PyVista not available for testing")
+    if not urdf_path:
+        print("URDF path required for robot_type='urdf'")
+        return None
+    return RobotMeshFactory.create_from_urdf(visualizer.pv, urdf_path, package_path)

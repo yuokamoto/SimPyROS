@@ -208,8 +208,8 @@ def interactive_robot_joint_demo(duration: float = 15.0, urdf_path: str = "examp
             
             # Save final screenshot
             os.makedirs("output", exist_ok=True)
-            visualizer.plotter.screenshot("output/robot_joint_demo_final.png")
-            print("Screenshot saved: output/robot_joint_demo_final.png")
+            visualizer.plotter.screenshot("../../output/robot_joint_demo_final.png")
+            print("Screenshot saved: ../../output/robot_joint_demo_final.png")
         
     except Exception as e:
         print(f"❌ Visualization error: {e}")
@@ -349,7 +349,7 @@ def multi_robot_coordination_demo(duration: float = 20.0):
         visualizer.plotter.show()
     else:
         env.run(until=duration + 1.0)
-        visualizer.plotter.screenshot("output/multi_robot_demo.png")
+        visualizer.plotter.screenshot("../../output/multi_robot_demo.png")
     
     print("✅ Multi-robot demo completed")
 

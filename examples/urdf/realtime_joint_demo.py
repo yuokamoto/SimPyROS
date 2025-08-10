@@ -261,8 +261,8 @@ def realtime_joint_demo(duration: float = 20.0):
             env.run(until=duration + 2.0)
             
             os.makedirs("output", exist_ok=True)
-            visualizer.plotter.screenshot("output/realtime_joint_demo.png")
-            print("Screenshot saved: output/realtime_joint_demo.png")
+            visualizer.plotter.screenshot("../../output/realtime_joint_demo.png")
+            print("Screenshot saved: ../../output/realtime_joint_demo.png")
         
     except Exception as e:
         print(f"❌ Visualization error: {e}")
