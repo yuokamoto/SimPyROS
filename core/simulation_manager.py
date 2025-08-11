@@ -14,7 +14,6 @@ Features:
 """
 
 import time
-import threading
 import signal
 import sys
 from typing import Dict, List, Optional, Callable, Any, Union
@@ -101,8 +100,11 @@ class SimulationManager:
         # Runtime state
         self._running = False
         self._shutdown_requested = False
-        self._simulation_thread: Optional[threading.Thread] = None
-        self._visualization_thread: Optional[threading.Thread] = None
+        self._simulation_paused = False
+        self._reset_requested = False
+        # SimPy processes for pure simulation environment
+        self._simulation_process = None
+        self._visualization_process = None
         
         # Performance tracking
         self._start_time = 0.0
@@ -190,7 +192,7 @@ class SimulationManager:
             if self.config.visualization:
                 self._initialize_visualization()
                 if self.visualizer and self.visualizer.available:
-                    self.visualizer.load_robot(name, robot, urdf_path)
+                    self.visualizer.load_robot(name, robot)  # Updated method signature
             
             print(f"✅ Robot '{name}' added from {urdf_path}")
             return robot
@@ -295,21 +297,21 @@ class SimulationManager:
             return True
         return False
     
-    def _simulation_loop(self):
-        """Main simulation loop running in separate thread"""
-        if not self.env:
-            print("❌ Environment not initialized")
-            return
-            
+    def _simulation_process_loop(self):
+        """Main simulation process loop - SimPy pure environment"""
         dt = 1.0 / self.config.update_rate
-        # Apply real time factor to sleep calculation
-        real_time_dt = dt / self.config.real_time_factor
         
         while self._running and not self._shutdown_requested:
-            loop_start = time.time()
-            
+            # Dynamically apply real time factor to simulation time (updated each loop)
+            simpy_dt = dt * self.config.real_time_factor
+            # Check if simulation is paused
+            if self._simulation_paused:
+                # Skip control updates when paused, but continue visualization
+                yield self.env.timeout(simpy_dt)
+                continue
+                
             # Process control callbacks
-            current_time = time.time()
+            current_time = self.env.now
             for robot_name, callback in self.control_callbacks.items():
                 if callback.should_call(current_time):
                     try:
@@ -317,44 +319,120 @@ class SimulationManager:
                     except Exception as e:
                         print(f"⚠️ Control callback error for {robot_name}: {e}")
             
-            # Update SimPy environment
-            try:
-                self.env.run(until=self.env.now + dt)
-            except Exception as e:
-                print(f"⚠️ Simulation step error: {e}")
-            
-            # Sleep to maintain real time factor
-            # real_time_factor < 1.0: slower than real time (more sleep)
-            # real_time_factor > 1.0: faster than real time (less sleep)
-            elapsed = time.time() - loop_start
-            sleep_time = max(0, real_time_dt - elapsed)
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            
             self._frame_count += 1
+            
+            # Yield control back to SimPy with time-adjusted interval
+            yield self.env.timeout(simpy_dt)
     
-    def _visualization_loop(self):
-        """Visualization update loop running in separate thread"""
+    def _visualization_process_loop(self):
+        """Visualization update process loop - SimPy pure environment"""
         if not self.visualizer or not self.visualizer.available:
             return
             
         dt = 1.0 / self.config.visualization_update_rate
         
         while self._running and not self._shutdown_requested:
-            loop_start = time.time()
             
             # Update robot visualizations
             for robot_name, robot in self.robots.items():
                 try:
                     self.visualizer.update_robot_visualization(robot_name)
                 except Exception as e:
-                    print(f"⚠️ Visualization update error for {robot_name}: {e}")
+                    print(f"⚠️ Robot visualization update error for {robot_name}: {e}")
             
-            # Sleep to maintain visualization rate
-            elapsed = time.time() - loop_start
-            sleep_time = max(0, dt - elapsed)
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            # Update simulation object visualizations
+            for object_name, obj in self.objects.items():
+                try:
+                    self._update_object_visualization(object_name, obj)
+                except Exception as e:
+                    print(f"⚠️ Object visualization update error for {object_name}: {e}")
+            
+            # Yield control back to SimPy
+            yield self.env.timeout(dt)
+    
+    def _duration_monitor(self, duration: float):
+        """Monitor simulation duration and close visualization when time expires"""
+        yield self.env.timeout(duration)
+        print(f"\n⏰ Duration {duration}s completed - closing visualization")
+        self._shutdown_requested = True
+        if self.visualizer and hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
+            try:
+                self.visualizer.plotter.close()
+            except:
+                pass
+    
+    def _update_object_visualization(self, object_name: str, obj: SimulationObject):
+        """Update visualization for a simulation object (box, sphere, etc.)"""
+        if not self.visualizer or not hasattr(self.visualizer, 'plotter'):
+            return
+        
+        try:
+            # Check if object has an associated mesh actor
+            if hasattr(obj, '_mesh_actor') and obj._mesh_actor is not None:
+                # Update transformation matrix
+                transform_matrix = obj.pose.to_transformation_matrix()
+                
+                # Set transformation on the mesh actor
+                try:
+                    vtk_matrix = self.visualizer.pv.vtk.vtkMatrix4x4()
+                    for i in range(4):
+                        for j in range(4):
+                            vtk_matrix.SetElement(i, j, transform_matrix[i, j])
+                    obj._mesh_actor.SetUserMatrix(vtk_matrix)
+                except Exception as e:
+                    print(f"⚠️ Failed to update {object_name} transformation: {e}")
+            else:
+                # Object not yet visualized, create mesh if needed
+                self._create_object_mesh(object_name, obj)
+                
+        except Exception as e:
+            print(f"⚠️ Failed to update visualization for {object_name}: {e}")
+    
+    def _create_object_mesh(self, object_name: str, obj: SimulationObject):
+        """Create mesh representation for simulation object"""
+        if not self.visualizer or not hasattr(self.visualizer, 'plotter'):
+            return
+        
+        try:
+            mesh = None
+            # Create mesh based on object parameters
+            if hasattr(obj.parameters, 'geometry_type'):
+                geometry_type = obj.parameters.geometry_type
+                params = getattr(obj.parameters, 'geometry_params', {})
+                
+                if geometry_type == "box":
+                    size = params.get('size', [0.3, 0.3, 0.3])
+                    mesh = self.visualizer.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
+                elif geometry_type == "cylinder":
+                    radius = params.get('radius', 0.05)
+                    height = params.get('height', 0.2)
+                    mesh = self.visualizer.pv.Cylinder(radius=radius, height=height, direction=(0, 0, 1))
+                elif geometry_type == "sphere":
+                    radius = params.get('radius', 0.1)
+                    mesh = self.visualizer.pv.Sphere(radius=radius)
+            
+            if mesh is not None:
+                # Apply current transformation
+                transform_matrix = obj.pose.to_transformation_matrix()
+                mesh.transform(transform_matrix, inplace=True)
+                
+                # Get color
+                color = getattr(obj.parameters, 'color', (0.6, 0.6, 0.6))
+                if len(color) > 3:
+                    color = color[:3]  # RGB only for PyVista
+                
+                # Add to scene and store reference
+                actor = self.visualizer.plotter.add_mesh(
+                    mesh, 
+                    color=color, 
+                    opacity=0.8, 
+                    name=f"object_{object_name}"
+                )
+                obj._mesh_actor = actor
+                print(f"✅ Created visualization for {object_name}: {geometry_type}")
+                
+        except Exception as e:
+            print(f"⚠️ Failed to create mesh for {object_name}: {e}")
     
     def run(self, duration: Optional[float] = None) -> bool:
         """
@@ -382,54 +460,67 @@ class SimulationManager:
         self._running = True
         self._start_time = time.time()
         
-        # Start simulation thread
-        self._simulation_thread = threading.Thread(
-            target=self._simulation_loop,
-            name="SimulationLoop"
-        )
-        self._simulation_thread.daemon = True
-        self._simulation_thread.start()
+        # Start simulation process in SimPy environment
+        self._simulation_process = self.env.process(self._simulation_process_loop())
         
-        # Start visualization thread
+        # Start visualization process
         if self.config.visualization and self.visualizer and self.visualizer.available:
-            self._visualization_thread = threading.Thread(
-                target=self._visualization_loop,
-                name="VisualizationLoop"  
-            )
-            self._visualization_thread.daemon = True
-            self._visualization_thread.start()
+            self._visualization_process = self.env.process(self._visualization_process_loop())
+            
+            # Connect visualizer to simulation manager for real-time factor control
+            if hasattr(self.visualizer, 'connect_simulation_manager'):
+                self.visualizer.connect_simulation_manager(self)
         
         try:
-            # Show interactive window first if visualization is enabled
             if self.config.visualization and self.visualizer and self.visualizer.available:
-                # Show interactive window (non-blocking for duration-based runs)
+                # Visualization mode: start window first, then run simulation with real-time updates
                 try:
+                    # Start PyVista window in non-blocking mode
+                    self.visualizer.plotter.show(
+                        auto_close=False, 
+                        interactive_update=True
+                    )
+                    
+                    # Run simulation with real-time visualization updates
+                    simulation_end_time = None
                     if duration:
-                        # Non-blocking show for timed runs
-                        self.visualizer.plotter.show(auto_close=False, interactive_update=True)
-                        # Run for specified duration
-                        end_time = time.time() + duration
-                        while time.time() < end_time and self._running and not self._shutdown_requested:
+                        # Set end time but continue visualization until window closed
+                        simulation_end_time = self.env.now + duration
+                        print(f"🕐 Simulation will run for {duration}s, but window stays open")
+                    
+                    while not self._shutdown_requested:
+                        # Check if simulation time has ended
+                        if simulation_end_time and self.env.now >= simulation_end_time:
+                            # Simulation finished, but keep visualization running
+                            if not hasattr(self, '_simulation_ended'):
+                                print(f"\n⏰ Simulation time ({duration}s) completed")
+                                print("💡 Visualization continues - close window or press Ctrl+C to exit")
+                                self._simulation_ended = True
+                                # Stop the simulation processes but keep visualization
+                                self._running = False  # This will stop simulation callbacks
+                        else:
+                            # Run simulation step
+                            self.env.run(until=min(self.env.now + 0.01, simulation_end_time or self.env.now + 0.01))
+                        
+                        # Always update visualization
+                        try:
                             self.visualizer.plotter.update()
-                            time.sleep(0.1)
-                        # Close window after duration
-                        self.visualizer.plotter.close()
-                    else:
-                        # Blocking show for indefinite runs
-                        self.visualizer.plotter.show()
+                        except:
+                            # Window closed by user
+                            break
+                                
                 except KeyboardInterrupt:
                     print("\n🛑 Visualization interrupted")
                     self._shutdown_requested = True
             else:
-                # Headless mode - wait based on duration
+                # Headless mode: run SimPy environment directly
                 if duration:
-                    end_time = time.time() + duration
-                    while time.time() < end_time and self._running and not self._shutdown_requested:
-                        time.sleep(0.1)
+                    self.env.run(until=duration)
                 else:
-                    # Wait for shutdown signal
-                    while self._running and not self._shutdown_requested:
-                        time.sleep(0.1)
+                    try:
+                        self.env.run()
+                    except KeyboardInterrupt:
+                        print("\n⏹️ Simulation stopped by user")
                         
         except KeyboardInterrupt:
             print("\n🛑 Interrupted by user")
@@ -438,6 +529,81 @@ class SimulationManager:
             self.shutdown()
         
         return True
+    
+    def set_realtime_factor(self, factor: float):
+        """
+        Update real-time factor during simulation
+        
+        Args:
+            factor: New real-time factor (0.1 to 5.0)
+        """
+        old_factor = self.config.real_time_factor
+        if factor < 0.1:
+            factor = 0.1
+        elif factor > 5.0:
+            factor = 5.0
+            
+        self.config.real_time_factor = factor
+        print(f"⏱️ SimulationManager real-time factor: {old_factor:.2f}x → {factor:.2f}x")
+        
+        # Also sync back to visualizer if it has different value
+        if hasattr(self, 'visualizer') and self.visualizer and hasattr(self.visualizer, 'realtime_factor'):
+            if abs(self.visualizer.realtime_factor - factor) > 0.01:
+                self.visualizer.realtime_factor = factor
+                print(f"🔄 Synchronized visualizer real-time factor: {factor:.2f}x")
+    
+    def get_realtime_factor(self) -> float:
+        """Get current real-time factor"""
+        return self.config.real_time_factor
+    
+    def pause_simulation(self):
+        """Pause the simulation"""
+        self._simulation_paused = True
+        
+        # Also stop all robot base velocities when paused
+        for robot_name, robot in self.robots.items():
+            try:
+                # Stop robot base motion using correct Velocity constructor arguments
+                from core.simulation_object import Velocity
+                robot.set_velocity(Velocity(
+                    linear_x=0.0, linear_y=0.0, linear_z=0.0,
+                    angular_x=0.0, angular_y=0.0, angular_z=0.0
+                ))
+                print(f"⏸️ Stopped base velocity for robot '{robot_name}'")
+            except Exception as e:
+                print(f"⚠️ Error stopping robot '{robot_name}' base velocity: {e}")
+        
+        print("⏸️ Simulation paused by user")
+    
+    def resume_simulation(self):
+        """Resume the simulation"""
+        self._simulation_paused = False
+        print("▶️ Simulation resumed by user")
+    
+    def reset_simulation(self):
+        """Reset simulation to initial state"""
+        self._reset_requested = True
+        print("🔄 Simulation reset requested")
+        # Reset all robot joint positions to zero
+        for robot_name, robot in self.robots.items():
+            try:
+                robot.stop_all_joints()
+                # Reset joint positions to zero
+                for joint_name in robot.get_joint_names():
+                    if robot.joints[joint_name].joint_type.value != 'fixed':
+                        robot.set_joint_position(joint_name, 0.0)
+                print(f"🔄 Reset robot '{robot_name}' joints to zero position")
+            except Exception as e:
+                print(f"⚠️ Error resetting robot '{robot_name}': {e}")
+        
+        # Reset simulation time
+        self._frame_count = 0
+        self._start_time = time.time()
+        self._reset_requested = False
+    
+    def is_paused(self) -> bool:
+        """Check if simulation is paused"""
+        return self._simulation_paused
     
     def shutdown(self):
         """Graceful shutdown of simulation"""
@@ -456,16 +622,18 @@ class SimulationManager:
             except Exception as e:
                 print(f"⚠️ Visualization cleanup warning: {e}")
         
-        # Wait for threads to finish with shorter timeout
-        if self._simulation_thread and self._simulation_thread.is_alive():
-            self._simulation_thread.join(timeout=1.0)
-            if self._simulation_thread.is_alive():
-                print("⚠️ Simulation thread didn't shut down gracefully")
-            
-        if self._visualization_thread and self._visualization_thread.is_alive():
-            self._visualization_thread.join(timeout=1.0)
-            if self._visualization_thread.is_alive():
-                print("⚠️ Visualization thread didn't shut down gracefully")
+        # SimPy processes are automatically cleaned up when environment shuts down
+        if self._simulation_process:
+            try:
+                self._simulation_process.interrupt()
+            except Exception:
+                pass
+        
+        if self._visualization_process:
+            try:
+                self._visualization_process.interrupt()
+            except Exception:
+                pass
         
         # Print performance statistics
         if self._start_time > 0:

@@ -426,14 +426,20 @@ class URDFLoader:
             print(f"    📍 Visual origin for {urdf_link.name}: {pos_str}, {rot_str}")
     
     def _extract_material_info(self, visual, urdf_link: URDFLink):
-        """Enhanced material and color extraction"""
+        """Enhanced material and color extraction with opacity fix"""
         # Try standard material color first
         if hasattr(visual, 'material') and visual.material:
             if hasattr(visual.material, 'color') and visual.material.color:
                 if hasattr(visual.material.color, 'rgba'):
                     rgba = visual.material.color.rgba
-                    urdf_link.color = tuple(rgba)
-                    print(f"    🎨 Material color for {urdf_link.name}: rgba={rgba}")
+                    # Fix transparency issue: ensure opacity = 1.0 unless explicitly transparent
+                    if len(rgba) >= 4:
+                        # Keep RGB, set alpha to 1.0 for opaque rendering
+                        fixed_rgba = (rgba[0], rgba[1], rgba[2], 1.0)
+                        urdf_link.color = fixed_rgba
+                        print(f"    🎨 Material color for {urdf_link.name}: rgba={rgba} -> fixed={fixed_rgba}")
+                    else:
+                        urdf_link.color = tuple(rgba) + (1.0,)  # Add opaque alpha
                     return
         
         # Assign default colors based on geometry type

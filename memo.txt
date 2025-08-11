@@ -33,7 +33,7 @@
 - visualizerはrobotだけupdateしていますか？simulation_objectはアップデートしてませんか?
 - urdf_loaderのmaterialが半透明なのを透明じゃなくしてほしい
 - ウィンドゥないにボタンを用意して、axizの表示のオンオフやrealtimefactorの変更、urdfのcollisionの表示のon/offの切り替えなどができるようにしたい。
-- urdfはURDFRobotVisualizerであつかっているので、
+- urdfはURDFRobotVisualizerであつかっているので、RobotMeshFactoryはURDFRobotVisualizerに統合してください。
 - URDFRobotVisualizerとRobot両方がload_urdfを呼んでいるが、Robotがload_urdfでloadしているので、Robotのlink/jointなどの情報から描画するようにすればよいのでは？
 
 7. ROBOT
@@ -41,3 +41,10 @@
 
 8. SimulationManager
 - simulation threadとvisualization threadを用意しているが、SimPyの枠組みでthreadを使う必要ありますか？必要なら理由を明示してください。
+
+todo
+- basic_simulation 次のロボットに自動でイカない。
+- real time factor 
+- connect 
+- mesh
+- ros2

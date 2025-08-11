@@ -6,7 +6,7 @@ Designed for ROS 2 integration with joint-level control
 
 import simpy
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from enum import Enum
 import warnings
@@ -537,6 +537,195 @@ class Robot(SimulationObject):
                 print(f"    Effort: {joint_limits['effort']}")
     
     # ====================
+    # Programmatic Robot Creation (7.1)
+    # ====================
+    
+    def add_link(self, name: str, geometry_type: str, 
+                geometry_params: Dict, color: Tuple[float, float, float] = (0.7, 0.7, 0.7),
+                pose: Pose = None) -> bool:
+        """
+        Add a link programmatically to the robot
+        
+        Args:
+            name: Link name
+            geometry_type: "box", "cylinder", "sphere", "mesh"
+            geometry_params: Parameters for geometry (size, radius, height, etc.)
+            color: RGB(A) color tuple
+            pose: Optional pose relative to parent
+            
+        Returns:
+            Success status
+        """
+        if name in self.links:
+            warnings.warn(f"Link '{name}' already exists")
+            return False
+        
+        try:
+            # Create a mock URDFLink object
+            from core.urdf_loader import URDFLink
+            
+            # Ensure color is RGBA
+            if len(color) == 3:
+                color = color + (1.0,)  # Add alpha
+            
+            # Create link object
+            link_info = URDFLink(
+                name=name,
+                geometry_type=geometry_type,
+                geometry_params=geometry_params.copy(),
+                color=color,
+                mesh_path=""  # Empty for programmatic links
+            )
+            
+            # Set pose if provided
+            if pose is not None:
+                link_info.pose = pose
+            
+            # Create Link instance
+            self.links[name] = Link(link_info)
+            self.link_names = list(self.links.keys())
+            
+            print(f"✅ Added link '{name}': {geometry_type}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to add link '{name}': {e}")
+            return False
+    
+    def add_joint(self, name: str, joint_type: Union[JointType, str],
+                 parent_link: str, child_link: str,
+                 origin_pos: np.ndarray, origin_rot: Rotation,
+                 axis: np.ndarray = None, limits: Dict = None) -> bool:
+        """
+        Add a joint programmatically to the robot
+        
+        Args:
+            name: Joint name
+            joint_type: Joint type (JointType enum or string)
+            parent_link: Name of parent link
+            child_link: Name of child link
+            origin_pos: Joint origin position [x, y, z]
+            origin_rot: Joint origin rotation (scipy Rotation)
+            axis: Joint axis vector (for revolute/prismatic joints)
+            limits: Joint limits dict {"lower": float, "upper": float, "velocity": float, "effort": float}
+            
+        Returns:
+            Success status
+        """
+        if name in self.joints:
+            warnings.warn(f"Joint '{name}' already exists")
+            return False
+            
+        if parent_link not in self.links:
+            print(f"❌ Parent link '{parent_link}' not found")
+            return False
+            
+        if child_link not in self.links:
+            print(f"❌ Child link '{child_link}' not found")
+            return False
+        
+        try:
+            # Create a mock URDFJoint object
+            from core.urdf_loader import URDFJoint
+            
+            # Convert joint_type to string if enum
+            if isinstance(joint_type, JointType):
+                joint_type_str = joint_type.value
+            else:
+                joint_type_str = str(joint_type)
+            
+            # Default axis for different joint types
+            if axis is None:
+                if joint_type_str in ["revolute", "continuous"]:
+                    axis = np.array([0, 0, 1])  # Z-axis rotation
+                elif joint_type_str == "prismatic":
+                    axis = np.array([0, 0, 1])  # Z-axis translation
+                else:
+                    axis = np.array([0, 0, 1])  # Default
+            
+            # Default limits
+            if limits is None:
+                limits = {
+                    "lower": -np.pi,
+                    "upper": np.pi,
+                    "velocity": 1.0,
+                    "effort": 100.0
+                }
+            
+            # Create joint info object
+            joint_info = URDFJoint(
+                name=name,
+                joint_type=joint_type_str,
+                parent_link=parent_link,
+                child_link=child_link,
+                origin_pos=origin_pos.copy(),
+                origin_rot=origin_rot,
+                axis=axis.copy(),
+                limits=limits.copy()
+            )
+            
+            # Create Joint instance
+            self.joints[name] = Joint(joint_info)
+            self.joint_names = list(self.joints.keys())
+            
+            print(f"✅ Added joint '{name}': {joint_type_str} ({parent_link} -> {child_link})")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to add joint '{name}': {e}")
+            return False
+    
+    def finalize_robot(self) -> bool:
+        """
+        Finalize robot creation and perform consistency checks
+        
+        Returns:
+            Success status
+        """
+        try:
+            # Update link and joint lists
+            self.link_names = list(self.links.keys())
+            self.joint_names = list(self.joints.keys())
+            
+            # Find base link (link with no parent joints)
+            child_links = set(joint.child_link for joint in self.joints.values())
+            base_candidates = [link_name for link_name in self.links.keys() 
+                             if link_name not in child_links]
+            
+            if len(base_candidates) == 1:
+                self.base_link_name = base_candidates[0]
+            elif len(base_candidates) > 1:
+                print(f"⚠️ Multiple potential base links found: {base_candidates}. Using first: {base_candidates[0]}")
+                self.base_link_name = base_candidates[0]
+            elif self.link_names:
+                print(f"⚠️ No base link found, using first link: {self.link_names[0]}")
+                self.base_link_name = self.link_names[0]
+            else:
+                print("❌ No links in robot")
+                return False
+            
+            # Update forward kinematics
+            self._update_forward_kinematics()
+            
+            print(f"✅ Robot finalized: {len(self.links)} links, {len(self.joints)} joints")
+            print(f"   Base link: {self.base_link_name}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to finalize robot: {e}")
+            return False
+    
+    def clear_robot(self):
+        """Clear all links and joints (for programmatic reconstruction)"""
+        self.links.clear()
+        self.joints.clear()
+        self.link_names.clear()
+        self.joint_names.clear()
+        self.base_link_name = ""
+        print("🗑️ Robot cleared")
+    
+    # ====================
     # Visualization Support
     # ====================
     
@@ -588,3 +777,57 @@ def create_robot_from_urdf(env: simpy.Environment,
     )
     
     return Robot(env, parameters)
+
+
+def create_robot_programmatically(env: simpy.Environment,
+                                 robot_name: str = "programmatic_robot",
+                                 initial_pose: Optional[Pose] = None,
+                                 joint_update_rate: float = 100.0) -> Robot:
+    """
+    Factory function to create an empty robot for programmatic construction
+    
+    Args:
+        env: SimPy environment
+        robot_name: Name for the robot object
+        initial_pose: Initial pose (default: origin)
+        joint_update_rate: Joint control frequency in Hz
+    
+    Returns:
+        Robot instance ready for programmatic construction
+    """
+    if initial_pose is None:
+        initial_pose = Pose()
+    
+    # Create dummy URDF path for programmatic robots
+    parameters = RobotParameters(
+        name=robot_name,
+        object_type=ObjectType.DYNAMIC,
+        urdf_path="",  # Empty for programmatic robots
+        initial_pose=initial_pose,
+        update_interval=0.01,
+        joint_update_rate=joint_update_rate
+    )
+    
+    # Create robot instance but skip URDF loading
+    robot = Robot.__new__(Robot)
+    robot.env = env
+    robot.robot_parameters = parameters
+    
+    # Initialize parent SimulationObject
+    from core.simulation_object import SimulationObject
+    SimulationObject.__init__(robot, env, parameters)
+    
+    # Initialize robot-specific attributes
+    robot.urdf_loader = None  # No URDF loader for programmatic robots
+    robot.links = {}
+    robot.joints = {}
+    robot.joint_names = []
+    robot.link_names = []
+    robot.base_link_name = ""
+    robot.robot_name = robot_name
+    robot.joint_command_queue = []
+    
+    print(f"✅ Created empty robot '{robot_name}' for programmatic construction")
+    print("   Use add_link(), add_joint(), and finalize_robot() to build the robot")
+    
+    return robot

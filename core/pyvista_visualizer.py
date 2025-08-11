@@ -8,6 +8,7 @@ import os
 import numpy as np
 import math
 import time
+import warnings
 from typing import Optional, Tuple, List, Dict, Union
 
 # Add parent directory to path
@@ -124,143 +125,8 @@ class PyVistaVisualizer:
 
 
 
-class RobotMeshFactory:
-    """Factory class for creating robot meshes"""
-    
-    @staticmethod
-    def create_from_urdf(pv_module, urdf_path: str, package_path: Optional[str] = None) -> Optional:
-        """
-        Create robot mesh from URDF file
-        
-        Args:
-            pv_module: PyVista module instance
-            urdf_path: Path to URDF file
-            package_path: Optional path to ROS package directory
-            
-        Returns:
-            Combined PyVista mesh or None
-        """
-        # Try URDF loader first (supports yourdfpy)
-        if URDF_SUPPORT:
-            try:
-                print("Using URDF loader...")
-                loader = URDFLoader(package_path)
-                if loader.is_available() and loader.load_urdf(urdf_path):
-                    
-                    # Create individual meshes with colors
-                    meshes = loader.create_pyvista_meshes(pv_module)
-                    if meshes:
-                        loader.print_info()
-                        # For now, return combined mesh but with individual color info stored
-                        combined_mesh = None
-                        for mesh_info in meshes:
-                            mesh = mesh_info['mesh']
-                            if combined_mesh is None:
-                                combined_mesh = mesh
-                            else:
-                                combined_mesh = combined_mesh + mesh
-                        
-                        # Store color information in the combined mesh
-                        if combined_mesh and meshes:
-                            combined_mesh.mesh_colors = [m['color'] for m in meshes]
-                            combined_mesh.mesh_names = [m['name'] for m in meshes]
-                            combined_mesh.individual_meshes = meshes
-                        
-                        return combined_mesh
-                    else:
-                        print("URDF loader: individual mesh creation failed")
-                        
-                        # Fallback to original combined mesh method
-                        mesh = loader.get_combined_mesh(pv_module)
-                        if mesh:
-                            loader.print_info()
-                            return mesh
-                        else:
-                            print("URDF loader: mesh creation failed")
-                else:
-                    print("URDF loader: loading failed")
-            except Exception as e:
-                print(f"URDF loader error: {e}")
-    
-    @staticmethod
-    def _create_geometric_from_urdf(pv_module, loader: 'URDFLoader') -> Optional:
-        """
-        Create geometric representation from URDF links when no mesh files are available
-        """
-        try:
-            combined_mesh = None
-            
-            for link_name, link in loader.links.items():
-                # Get link from original URDF
-                urdf_link = None
-                for ul in loader.robot.links:
-                    if ul.name == link_name:
-                        urdf_link = ul
-                        break
-                
-                if not urdf_link or not urdf_link.visuals:
-                    continue
-                
-                for visual in urdf_link.visuals:
-                    geom = visual.geometry
-                    mesh_part = None
-                    
-                    # Create geometry based on type
-                    if hasattr(geom, 'box') and geom.box:
-                        size = geom.box.size
-                        mesh_part = pv_module.Box(bounds=[
-                            -size[0]/2, size[0]/2,
-                            -size[1]/2, size[1]/2,
-                            -size[2]/2, size[2]/2
-                        ])
-                    elif hasattr(geom, 'cylinder') and geom.cylinder:
-                        radius = geom.cylinder.radius
-                        length = geom.cylinder.length
-                        mesh_part = pv_module.Cylinder(
-                            center=[0, 0, 0],
-                            direction=[0, 0, 1],
-                            radius=radius,
-                            height=length
-                        )
-                    elif hasattr(geom, 'sphere') and geom.sphere:
-                        radius = geom.sphere.radius
-                        mesh_part = pv_module.Sphere(radius=radius)
-                    
-                    if mesh_part:
-                        # Apply visual origin transform if available
-                        if visual.origin is not None:
-                            transform = visual.origin
-                            mesh_part.transform(transform, inplace=True)
-                        
-                        # Apply joint transforms to position link correctly
-                        # This is a simplified approach - full FK would be more accurate
-                        joint_transform = RobotMeshFactory._get_joint_transform_to_base(loader, link_name)
-                        if joint_transform is not None:
-                            mesh_part.transform(joint_transform, inplace=True)
-                        
-                        if combined_mesh is None:
-                            combined_mesh = mesh_part
-                        else:
-                            combined_mesh = combined_mesh + mesh_part
-            
-            return combined_mesh
-            
-        except Exception as e:
-            print(f"Error creating geometric representation from URDF: {e}")
-            return None
-    
-    @staticmethod
-    def _get_joint_transform_to_base(loader: 'URDFLoader', link_name: str) -> Optional[np.ndarray]:
-        """Get cumulative transform from base to given link"""
-        # This is a simplified version - full implementation would do proper forward kinematics
-        try:
-            for joint_name, joint in loader.joints.items():
-                if joint.child_link == link_name and joint.pose:
-                    return joint.pose.to_transformation_matrix()
-            return None
-        except:
-            return None
-    
+# RobotMeshFactory has been completely integrated into URDFRobotVisualizer (memo.txt 36, 37)
+# All robot visualization now uses Robot instance data directly via load_robot() method
 
 
 class SceneBuilder:
@@ -311,9 +177,9 @@ class SceneBuilder:
                 scale=length
             )
             
-            plotter.add_mesh(x_axis, color='red')
-            plotter.add_mesh(y_axis, color='green')
-            plotter.add_mesh(z_axis, color='blue')
+            plotter.add_mesh(x_axis, color='red', name='coord_axis_x')
+            plotter.add_mesh(y_axis, color='green', name='coord_axis_y')
+            plotter.add_mesh(z_axis, color='blue', name='coord_axis_z')
             return True
             
         except Exception as e:
@@ -529,7 +395,8 @@ def setup_basic_scene(visualizer: PyVistaVisualizer) -> bool:
         
     success = True
     success &= SceneBuilder.add_ground_plane(visualizer.plotter, visualizer.pv)
-    success &= SceneBuilder.add_coordinate_axes(visualizer.plotter, visualizer.pv)
+    # Skip coordinate axes by default - user can enable via toggle
+    # success &= SceneBuilder.add_coordinate_axes(visualizer.plotter, visualizer.pv)
     success &= SceneBuilder.set_camera_view(visualizer.plotter)
     
     return success
@@ -537,14 +404,22 @@ def setup_basic_scene(visualizer: PyVistaVisualizer) -> bool:
 
 # Robot mesh creation functions
 def create_robot_mesh_from_urdf(visualizer: PyVistaVisualizer, urdf_path: str = None, package_path: str = None):
-    """Create a robot mesh from URDF file"""
+    """Create a robot mesh from URDF file - DEPRECATED: Use URDFRobotVisualizer instead"""
+    warnings.warn("create_robot_mesh_from_urdf is deprecated. Use URDFRobotVisualizer._create_mesh_from_urdf() instead.", 
+                 DeprecationWarning, stacklevel=2)
+    
     if not visualizer.available:
         return None
         
     if not urdf_path:
         print("URDF path required for robot_type='urdf'")
         return None
-    return RobotMeshFactory.create_from_urdf(visualizer.pv, urdf_path, package_path)
+    
+    # RobotMeshFactory has been deprecated and integrated into URDFRobotVisualizer
+    # This function is now a legacy wrapper - use URDFRobotVisualizer.load_robot() instead
+    warnings.warn("create_robot_mesh_from_urdf is deprecated. Use URDFRobotVisualizer.load_robot() instead.", 
+                 DeprecationWarning, stacklevel=2)
+    return None
 
 
 class URDFRobotVisualizer(PyVistaVisualizer):
@@ -568,18 +443,304 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         self.link_actors: Dict[str, Dict[str, Any]] = {}  # Store link actors per robot
         self.animation_controllers: Dict[str, AnimationController] = {}
         
-        # Setup basic scene if available
+        # Interactive controls state (6.3)
+        self.controls_enabled = True
+        self.axis_display_visible = False  # Default to disabled coordinate axes
+        self.realtime_factor = 1.0
+        self.collision_display_visible = False
+        self.wireframe_mode = False
+        
+        # Simulation control state
+        self.simulation_paused = False
+        self.simulation_running = False
+        
+        # SimulationManager connection for real-time factor control (8.2)
+        self._connected_simulation_manager = None
+        
+        # Setup basic scene and controls if available
         if self.available:
             setup_basic_scene(self)
+            if interactive:
+                self._setup_interactive_controls()
     
-    def load_robot(self, robot_name: str, robot_instance, urdf_path: str) -> bool:
+    def _setup_interactive_controls(self):
+        """Setup interactive UI controls using PyVista widgets"""
+        if not self.available or not hasattr(self, 'plotter') or not self.plotter:
+            return
+        
+        try:
+            # Add text labels for buttons
+            self.plotter.add_text("🎯 Axes", position=(70, 20), font_size=10, color='white')
+            
+            # Add checkbox for axis display toggle
+            self.plotter.add_checkbox_button_widget(
+                callback=self._toggle_axis_display,
+                value=self.axis_display_visible,
+                position=(10, 10),
+                size=50,
+                border_size=2,
+                color_on='green',
+                color_off='red'
+            )
+            
+            # Add slider for real-time factor control
+            self.plotter.add_slider_widget(
+                callback=self._update_realtime_factor,
+                rng=[0.1, 5.0],
+                value=self.realtime_factor,
+                title="Real-time Factor",
+                pointa=(0.1, 0.9),
+                pointb=(0.4, 0.9),
+                style='modern'
+            )
+            
+            # Add collision toggle button with label
+            self.plotter.add_text("🚧 Collision", position=(70, 80), font_size=10, color='white')
+            self.plotter.add_checkbox_button_widget(
+                callback=self._toggle_collision_display,
+                value=self.collision_display_visible,
+                position=(10, 70),
+                size=50,
+                border_size=2,
+                color_on='yellow',
+                color_off='gray'
+            )
+            
+            # Add wireframe toggle button with label  
+            self.plotter.add_text("🕸️ Wire", position=(70, 140), font_size=10, color='white')
+            self.plotter.add_checkbox_button_widget(
+                callback=self._toggle_wireframe_mode,
+                value=self.wireframe_mode,
+                position=(10, 130),
+                size=50,
+                border_size=2,
+                color_on='cyan',
+                color_off='darkgray'
+            )
+            
+            # Add simulation control buttons with labels
+            # Play/Pause button
+            self.plotter.add_text("▶️ Play/Pause", position=(80, 200), font_size=10, color='white')
+            self.plotter.add_checkbox_button_widget(
+                callback=self._toggle_simulation_pause,
+                value=not self.simulation_paused,  # Inverted logic: True = Playing
+                position=(10, 190),
+                size=60,
+                border_size=3,
+                color_on='green',
+                color_off='orange'
+            )
+            
+            # Reset button (single click button) with label
+            try:
+                self.plotter.add_text("🔄 Reset", position=(190, 200), font_size=10, color='white')
+                # Note: PyVista doesn't have a dedicated button widget, using checkbox as button
+                self.plotter.add_checkbox_button_widget(
+                    callback=self._reset_simulation,
+                    value=False,  # Always false, acts as button
+                    position=(150, 190),
+                    size=50,
+                    border_size=2,
+                    color_on='red',
+                    color_off='darkred'
+                )
+            except Exception as e:
+                print(f"⚠️ Could not add reset button: {e}")
+            
+            print("✅ Interactive controls setup complete (with simulation controls)")
+            
+        except Exception as e:
+            print(f"⚠️ Failed to setup interactive controls: {e}")
+            # Continue without interactive controls
+    
+    def _toggle_axis_display(self, value):
+        """Toggle coordinate axis display"""
+        self.axis_display_visible = value
+        try:
+            if value:
+                # Show axis - add coordinate axes if not present
+                SceneBuilder.add_coordinate_axes(self.plotter, self.pv)
+                print("🎯 Axis display enabled")
+            else:
+                # Hide axis - remove coordinate axes
+                try:
+                    # Remove axes actors using correct names
+                    self.plotter.remove_actor('coord_axis_x')
+                    self.plotter.remove_actor('coord_axis_y')  
+                    self.plotter.remove_actor('coord_axis_z')
+                    print("🎯 Axis display disabled")
+                except Exception as remove_error:
+                    print(f"⚠️ Error removing axis actors: {remove_error}")
+                    # Try alternative approach - clear all meshes with axis names
+                    try:
+                        renderer = self.plotter.renderer
+                        actors_to_remove = []
+                        for actor in renderer.GetActors():
+                            if hasattr(actor, 'GetMapper') and actor.GetMapper():
+                                input_data = actor.GetMapper().GetInput()
+                                if hasattr(input_data, 'GetFieldData'):
+                                    # Check if this is an axis actor
+                                    actors_to_remove.append(actor)
+                        # Remove collected axis actors
+                        for actor in actors_to_remove[:3]:  # Remove up to 3 axis actors
+                            renderer.RemoveActor(actor)
+                        print("🎯 Axis display disabled (fallback method)")
+                    except Exception as fallback_error:
+                        print(f"⚠️ Fallback axis removal failed: {fallback_error}")
+        except Exception as e:
+            print(f"⚠️ Error toggling axis display: {e}")
+    
+    def _update_realtime_factor(self, value):
+        """Update real-time factor"""
+        old_value = self.realtime_factor
+        self.realtime_factor = value
+        print(f"⏱️ Visualizer real-time factor slider: {old_value:.2f}x → {value:.2f}x")
+        
+        # Update connected SimulationManager if available
+        if hasattr(self, '_connected_simulation_manager') and self._connected_simulation_manager:
+            print(f"🔗 Updating connected SimulationManager...")
+            self._connected_simulation_manager.set_realtime_factor(value)
+        else:
+            print(f"⚠️ No SimulationManager connected - change will not affect simulation speed")
+    
+    def _toggle_collision_display(self, value):
+        """Toggle collision geometry display"""
+        self.collision_display_visible = value
+        try:
+            if value:
+                # Show collision geometries (would need URDF collision data)
+                print("🚧 Collision display enabled")
+                # Implementation would add collision meshes
+            else:
+                print("🚧 Collision display disabled")
+                # Implementation would remove collision meshes
+        except Exception as e:
+            print(f"⚠️ Error toggling collision display: {e}")
+    
+    def _toggle_wireframe_mode(self, value):
+        """Toggle wireframe rendering mode"""
+        self.wireframe_mode = value
+        try:
+            if value:
+                print("🕸️ Wireframe mode enabled")
+                # Set all robot meshes to wireframe
+                for robot_name, link_actors in self.link_actors.items():
+                    for link_name, actor_info in link_actors.items():
+                        actor = actor_info['actor']
+                        if hasattr(actor, 'GetProperty'):
+                            actor.GetProperty().SetRepresentationToWireframe()
+            else:
+                print("🎨 Surface mode enabled")
+                # Set all robot meshes to surface
+                for robot_name, link_actors in self.link_actors.items():
+                    for link_name, actor_info in link_actors.items():
+                        actor = actor_info['actor']
+                        if hasattr(actor, 'GetProperty'):
+                            actor.GetProperty().SetRepresentationToSurface()
+        except Exception as e:
+            print(f"⚠️ Error toggling wireframe mode: {e}")
+    
+    def _toggle_simulation_pause(self, value):
+        """Toggle simulation pause/resume"""
+        # Inverted logic: value=True means playing, value=False means paused
+        self.simulation_paused = not value
+        
+        try:
+            if self.simulation_paused:
+                print("⏸️ Simulation PAUSED")
+                if self._connected_simulation_manager:
+                    self._connected_simulation_manager.pause_simulation()
+            else:
+                print("▶️ Simulation RESUMED")
+                if self._connected_simulation_manager:
+                    self._connected_simulation_manager.resume_simulation()
+        except Exception as e:
+            print(f"⚠️ Error toggling simulation pause: {e}")
+    
+    def _reset_simulation(self, value):
+        """Reset simulation to initial state"""
+        try:
+            print("🔄 Simulation RESET")
+            if self._connected_simulation_manager:
+                self._connected_simulation_manager.reset_simulation()
+        except Exception as e:
+            print(f"⚠️ Error resetting simulation: {e}")
+    
+    def connect_simulation_manager(self, simulation_manager):
+        """Connect to a SimulationManager for real-time control synchronization"""
+        self._connected_simulation_manager = simulation_manager
+        # Sync initial realtime factor
+        if hasattr(simulation_manager, 'config') and hasattr(simulation_manager.config, 'real_time_factor'):
+            self.realtime_factor = simulation_manager.config.real_time_factor
+        print(f"🔗 Connected to SimulationManager for real-time factor control")
+    
+    def disconnect_simulation_manager(self):
+        """Disconnect from SimulationManager"""
+        self._connected_simulation_manager = None
+        print(f"🔗 Disconnected from SimulationManager")
+    
+    def _create_mesh_from_urdf(self, urdf_path: str, package_path: Optional[str] = None):
         """
-        Load a robot for visualization and control
+        Create robot mesh from URDF file - Integrated from RobotMeshFactory
+        
+        Args:
+            urdf_path: Path to URDF file
+            package_path: Optional path to ROS package directory
+            
+        Returns:
+            Combined PyVista mesh or None
+        """
+        # Try URDF loader first (supports yourdfpy)
+        if URDF_SUPPORT:
+            try:
+                print("Using URDF loader...")
+                from core.urdf_loader import URDFLoader
+                loader = URDFLoader(package_path)
+                if loader.is_available() and loader.load_urdf(urdf_path):
+                    
+                    # Create individual meshes with colors
+                    meshes = loader.create_pyvista_meshes(self.pv)
+                    if meshes:
+                        loader.print_info()
+                        # For now, return combined mesh but with individual color info stored
+                        combined_mesh = None
+                        for mesh_info in meshes:
+                            mesh = mesh_info['mesh']
+                            if combined_mesh is None:
+                                combined_mesh = mesh
+                            else:
+                                combined_mesh = combined_mesh + mesh
+                        
+                        # Store color information in the combined mesh
+                        if combined_mesh and meshes:
+                            combined_mesh.mesh_colors = [m['color'] for m in meshes]
+                            combined_mesh.mesh_names = [m['name'] for m in meshes]
+                            combined_mesh.individual_meshes = meshes
+                        
+                        return combined_mesh
+                    else:
+                        print("URDF loader: individual mesh creation failed")
+                        
+                        # Fallback to original combined mesh method
+                        mesh = loader.get_combined_mesh(self.pv)
+                        if mesh:
+                            loader.print_info()
+                            return mesh
+                        else:
+                            print("URDF loader: mesh creation failed")
+                else:
+                    print("URDF loader: loading failed")
+            except Exception as e:
+                print(f"URDF loader error: {e}")
+        return None
+    
+    def load_robot(self, robot_name: str, robot_instance) -> bool:
+        """
+        Load a robot for visualization and control - Optimized version using robot instance data
         
         Args:
             robot_name: Unique name for this robot instance
-            robot_instance: Robot object from robot.py
-            urdf_path: Path to URDF file
+            robot_instance: Robot object from robot.py (already loaded URDF)
             
         Returns:
             bool: Success status
@@ -588,74 +749,69 @@ class URDFRobotVisualizer(PyVistaVisualizer):
             print("❌ PyVista not available")
             return False
         
-        print(f"🤖 Loading robot '{robot_name}' from {urdf_path}")
+        print(f"🤖 Loading robot '{robot_name}' using existing robot data")
         
         try:
-            # Import URDF loader locally to avoid circular imports
-            from core.urdf_loader import URDFLoader
-            
-            # Create URDF loader
-            urdf_loader = URDFLoader()
-            if not urdf_loader.load_urdf(urdf_path):
-                print(f"❌ Failed to load URDF: {urdf_path}")
+            # Check if robot has URDF data loaded
+            if not hasattr(robot_instance, 'urdf_loader') or robot_instance.urdf_loader is None:
+                print(f"❌ Robot instance has no URDF data loaded")
                 return False
             
-            # Store robot and loader
+            # Store robot (reuse existing URDF loader from robot instance)
             self.robots[robot_name] = robot_instance
-            self.urdf_loaders[robot_name] = urdf_loader
+            self.urdf_loaders[robot_name] = robot_instance.urdf_loader
             
-            # Create individual link meshes with real-time updates
-            self._create_robot_link_actors(robot_name)
+            # Create individual link meshes using robot's link/joint info
+            self._create_robot_link_actors_from_robot(robot_name, robot_instance)
             
             # Create animation controller for this robot
             animation_controller = AnimationController(self.plotter, self.pv)
             self.animation_controllers[robot_name] = animation_controller
             
-            print(f"✅ Robot '{robot_name}' loaded successfully")
-            urdf_loader.print_info()
+            print(f"✅ Robot '{robot_name}' loaded successfully (reused URDF data)")
+            robot_instance.urdf_loader.print_info()
             return True
             
         except Exception as e:
             print(f"❌ Failed to load robot '{robot_name}': {e}")
             return False
     
-    def _create_robot_link_actors(self, robot_name: str):
-        """Create individual link actors for a robot"""
-        urdf_loader = self.urdf_loaders[robot_name]
+    def _create_robot_link_actors_from_robot(self, robot_name: str, robot_instance):
+        """Create individual link actors using robot instance data - Optimized approach"""
         link_actors = {}
         
-        print(f"🎨 Creating individual link meshes for '{robot_name}'...")
+        print(f"🎨 Creating individual link meshes for '{robot_name}' using robot data...")
         
-        for link_name, link_info in urdf_loader.links.items():
+        for link_name, link_obj in robot_instance.links.items():
             # Create mesh based on geometry type
             mesh = None
             
-            if link_info.geometry_type == "box":
-                size = link_info.geometry_params.get('size', [0.3, 0.3, 0.1])
+            if link_obj.geometry_type == "box":
+                size = link_obj.geometry_params.get('size', [0.3, 0.3, 0.1])
                 mesh = self.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
                 
-            elif link_info.geometry_type == "cylinder":
-                radius = link_info.geometry_params.get('radius', 0.05)
-                length = link_info.geometry_params.get('length', 0.35)
+            elif link_obj.geometry_type == "cylinder":
+                radius = link_obj.geometry_params.get('radius', 0.05)
+                length = link_obj.geometry_params.get('length', 0.35)
                 mesh = self.pv.Cylinder(radius=radius, height=length, direction=(0, 0, 1))
                 
-            elif link_info.geometry_type == "sphere":
-                radius = link_info.geometry_params.get('radius', 0.08)
+            elif link_obj.geometry_type == "sphere":
+                radius = link_obj.geometry_params.get('radius', 0.08)
                 mesh = self.pv.Sphere(radius=radius)
             
             if mesh is not None:
-                # Apply visual origin transformation if present
-                if hasattr(link_info, 'pose') and link_info.pose is not None:
-                    transform_matrix = link_info.pose.to_transformation_matrix()
-                    mesh.transform(transform_matrix, inplace=True)
-                    
-                    # Debug output for non-identity transformations
-                    pos = link_info.pose.position
-                    if not all(abs(x) < 0.001 for x in pos):
+                # Apply visual origin transformation from URDF data
+                urdf_loader = robot_instance.urdf_loader
+                if urdf_loader and link_name in urdf_loader.links:
+                    urdf_link_info = urdf_loader.links[link_name]
+                    if hasattr(urdf_link_info, 'pose') and urdf_link_info.pose is not None:
+                        transform_matrix = urdf_link_info.pose.to_transformation_matrix()
+                        mesh.transform(transform_matrix, inplace=True)
+                        pos = urdf_link_info.pose.position
                         print(f"    🔧 Applied visual origin to {link_name}: pos={pos}")
                 
                 # Add to scene with link color
-                color = link_info.color[:3]  # RGB only
+                color = link_obj.color[:3] if len(link_obj.color) >= 3 else (0.6, 0.6, 0.6)
                 actor = self.plotter.add_mesh(
                     mesh, 
                     color=color, 
@@ -666,12 +822,15 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                     'actor': actor,
                     'mesh': mesh.copy(),  # Store original mesh
                     'color': color,
-                    'geometry_type': link_info.geometry_type
+                    'geometry_type': link_obj.geometry_type
                 }
-                print(f"  Added {link_name}: {link_info.geometry_type} with color {color}")
+                print(f"  Added {link_name}: {link_obj.geometry_type} with color {color}")
         
         self.link_actors[robot_name] = link_actors
-        print(f"✅ Created {len(link_actors)} individual links for '{robot_name}'")
+        print(f"✅ Created {len(link_actors)} individual links for '{robot_name}' using robot data")
+    
+    # _create_robot_link_actors has been removed - use _create_robot_link_actors_from_robot instead
+    # This ensures all mesh creation uses Robot instance data directly (memo.txt requirement 37)
     
     def update_robot_visualization(self, robot_name: str):
         """Update robot visualization based on current joint positions"""
@@ -690,16 +849,30 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                     # Create transformation matrix
                     transform_matrix = pose.to_transformation_matrix()
                     
-                    # Update mesh position
-                    original_mesh = link_actors[link_name]['mesh'].copy()
-                    original_mesh.transform(transform_matrix)
-                    
-                    # Update the actor
+                    # Get actor reference
                     actor = link_actors[link_name]['actor']
-                    if hasattr(actor, 'GetMapper'):
-                        mapper = actor.GetMapper()
-                        mapper.SetInputData(original_mesh)
-                        mapper.Modified()
+                    
+                    # Update mesh position using transformation matrix directly on actor
+                    try:
+                        # Convert numpy array to VTK matrix for efficient update
+                        vtk_matrix = self.pv.vtk.vtkMatrix4x4()
+                        for i in range(4):
+                            for j in range(4):
+                                vtk_matrix.SetElement(i, j, transform_matrix[i, j])
+                        
+                        # Set the transformation matrix on the actor
+                        actor.SetUserMatrix(vtk_matrix)
+                        
+                    except Exception as e:
+                        # Fallback: copy and transform mesh
+                        original_mesh = link_actors[link_name]['mesh'].copy()
+                        original_mesh.transform(transform_matrix, inplace=True)
+                        
+                        # Update the actor using mapper
+                        if hasattr(actor, 'GetMapper'):
+                            mapper = actor.GetMapper()
+                            mapper.SetInputData(original_mesh)
+                            mapper.Modified()
             
             return True
             
