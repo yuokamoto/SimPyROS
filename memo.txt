@@ -1,0 +1,43 @@
+下記改善案。なお、案そのものに課題がある場合は、実装前に相談すること。
+
+1. simulationを走らせるためにexampleのコード量が多い。
+- 理想的にはユーザーは, 1) 環境構築, 2) ロボット追加, 3) 周期的にロボット動かす指令を与える、だけにしたい
+- 上を実現するため、run関数（関数名は仮、引数も適宜追加）を作る。
+- runはsimulation_objectsのリストor辞書を持っている。
+- runは定められた周期で、robotの位置や関節の更新を行う、あるいはシンプルにrobotないのupdate関数を呼ぶでもよい。更新はdynamicオブジェクトのみ行う。
+- headlessを引数として受け取り、trueの場合は可視化する。
+- 基本はctrl-cがwindowsのxボタンが押されるまで無限ループ
+- 上の関数は上記処理を自動で実行。ユーザーはロボット追加と周期実行の部分だけ実装すれば良い。
+- 上記関数はクラスで実装されたインターフェースを持っていて、後のROS2との統合を考えて、https://github.com/ros-simulation/simulation_interfaces　と同様のインターフェースを持つ
+
+
+2. urdfで, 3D meshをloadするexampleの追加
+- 現状はprimitive（box, cylinder, sphere）の可視化機能がある
+- 3D メッシュの可視化を追加したい
+- exampleとしてturtlebot3（https://github.com/ROBOTIS-GIT/turtlebot3）とur5(https://github.com/UniversalRobots/Universal_Robots_ROS2_Description)のロボットアームのメッシュを可視化して制御したい
+- それぞれのレポジトリはexample実行時にクローンするように指示し、このレポジトリには含めない
+
+3. linkへのconnect
+- simulation_objectのconnectをrobotにも拡張する。robot内のlinkにconnectできるようにする。
+- connectされたオブジェクトは、ロボット自体が動いた時は一緒に動き（現在のsimulation objectのconnectの挙動、変更必要ない）し、関節が動いてlinkのみが動いた場合も、linkの動きに追従する
+
+4. urdf_loader
+- enhanced_urdf_loaderとurdf_loaderを統合する。meshをloadするのは基礎機能なので
+- git cloneする機能は必要ない。turtlebot3, URはあくまで例
+
+5. others
+- pyvista_visualizerはlibraryなので、demoは別ファイルかクラスに移動
+- real time factorをsimulationmanagerの引数として渡せるようにする
+
+6. visualizer
+- visualizerはrobotだけupdateしていますか？simulation_objectはアップデートしてませんか?
+- urdf_loaderのmaterialが半透明なのを透明じゃなくしてほしい
+- ウィンドゥないにボタンを用意して、axizの表示のオンオフやrealtimefactorの変更、urdfのcollisionの表示のon/offの切り替えなどができるようにしたい。
+- urdfはURDFRobotVisualizerであつかっているので、
+- URDFRobotVisualizerとRobot両方がload_urdfを呼んでいるが、Robotがload_urdfでloadしているので、Robotのlink/jointなどの情報から描画するようにすればよいのでは？
+
+7. ROBOT
+- urdf以外からからもロボットを作成できるように、add_link, add_jointなどのメソッドが欲しい。
+
+8. SimulationManager
+- simulation threadとvisualization threadを用意しているが、SimPyの枠組みでthreadを使う必要ありますか？必要なら理由を明示してください。

@@ -28,9 +28,9 @@ import math
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from simulation_object import Pose
-from pyvista_visualizer import create_interactive_visualizer, setup_basic_scene, AnimationController
-from sample_robots import SampleRobotFactory
+from core.simulation_object import Pose
+from core.pyvista_visualizer import create_interactive_visualizer, setup_basic_scene, AnimationController
+from examples.pyvista.sample_robots import SampleRobotFactory
 
 OUTPUT_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'output')
 os.makedirs(OUTPUT_FILE_PATH, exist_ok=True)

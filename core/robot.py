@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 import warnings
 
-from simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
-from urdf_loader import URDFLoader, URDFLink, URDFJoint
+from core.simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
+from core.urdf_loader import URDFLoader, URDFLink, URDFJoint
 from scipy.spatial.transform import Rotation
 
 
@@ -330,6 +330,9 @@ class Robot(SimulationObject):
         for link_name, pose in link_poses.items():
             if link_name in self.links:
                 self.links[link_name].current_pose = pose
+        
+        # Update connected objects (if link connector is available)
+        self._update_link_connections()
     
     def _compute_link_poses_recursive(self, parent_link: str, parent_pose: Pose, link_poses: Dict[str, Pose]):
         """Recursively compute link poses from joint transformations"""
@@ -350,6 +353,28 @@ class Robot(SimulationObject):
                 
                 # Recursively process children of this link
                 self._compute_link_poses_recursive(joint.child_link, child_pose, link_poses)
+    
+    def _update_link_connections(self):
+        """Update objects connected to robot links (if link connector is available)"""
+        try:
+            # Import here to avoid circular dependency
+            from core.link_connector import get_link_connector
+            
+            connector = get_link_connector()
+            
+            # Update all connections for this robot
+            if self in connector.connections:
+                for link_name, connections in connector.connections[self].items():
+                    for connection in connections:
+                        if connection.active:
+                            connector._update_object_pose(self, link_name, connection)
+                            
+        except ImportError:
+            # Link connector not available, skip
+            pass
+        except Exception as e:
+            # Don't let connection errors break robot updates
+            warnings.warn(f"Link connection update failed: {e}")
     
     # ====================
     # Robot-level Control Interface (inherited from SimulationObject)
@@ -563,19 +588,3 @@ def create_robot_from_urdf(env: simpy.Environment,
     )
     
     return Robot(env, parameters)
-
-
-def create_simple_arm_robot(env: simpy.Environment, 
-                           robot_name: str = "simple_arm",
-                           initial_pose: Optional[Pose] = None) -> Robot:
-    """Create a simple arm robot using the default URDF"""
-    urdf_path = "examples/robots/simple_robot.urdf"
-    return create_robot_from_urdf(env, urdf_path, robot_name, initial_pose)
-
-
-def create_mobile_robot(env: simpy.Environment,
-                       robot_name: str = "mobile_robot", 
-                       initial_pose: Optional[Pose] = None) -> Robot:
-    """Create a mobile robot using the mobile robot URDF"""
-    urdf_path = "examples/robots/mobile_robot.urdf"
-    return create_robot_from_urdf(env, urdf_path, robot_name, initial_pose)

@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import numpy as np
 import time
 import math
-from simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose
+from core.simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose
 import simpy
 
 

@@ -1,16 +1,32 @@
 #!/usr/bin/env python3
 """
-Advanced URDF Loader for SimPyROS
-Using yourdfpy for modern URDF parsing
+Unified URDF Loader for SimPyROS
+
+Integrates basic URDF loading with enhanced mesh support and external repository handling.
+Supports both primitive geometries and 3D mesh files from local and external sources.
+
+Features:
+- yourdfpy-based URDF parsing
+- Primitive geometries (box, cylinder, sphere)
+- 3D mesh loading with multiple formats (STL, OBJ, DAE)
+- ROS package path resolution
+- Mesh optimization and simplification
+- Material and color extraction
 """
 
 import os
+import sys
+import urllib.parse
 import numpy as np
-from typing import Optional, Dict, List, Tuple, Union
+from typing import Optional, Dict, List, Tuple, Union, Any
 from dataclasses import dataclass
+from pathlib import Path
 import warnings
 
-from simulation_object import Pose
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from core.simulation_object import Pose
 from scipy.spatial.transform import Rotation
 
 # Try to import yourdfpy
@@ -35,13 +51,15 @@ except ImportError:
 
 @dataclass
 class URDFLink:
-    """URDF link representation with material support"""
+    """URDF link representation with enhanced material and mesh support"""
     name: str
     geometry_type: str  # 'box', 'cylinder', 'sphere', 'mesh'
     geometry_params: Dict  # dimensions, radius, etc.
     color: Tuple[float, float, float, float] = (0.7, 0.7, 0.7, 1.0)  # RGBA
     mesh_path: Optional[str] = None
+    original_mesh_path: Optional[str] = None  # Original path from URDF
     pose: Optional[Pose] = None
+    mesh_metadata: Dict = None  # Mesh analysis data
 
 
 @dataclass  
@@ -58,14 +76,22 @@ class URDFJoint:
 
 
 class URDFLoader:
-    """URDF loader supporting multiple libraries and features"""
+    """Unified URDF loader with mesh loading and optimization support"""
     
-    def __init__(self, package_path: Optional[str] = None):
+    def __init__(self, package_path: Optional[str] = None, enable_mesh_optimization: bool = True):
         self.package_path = package_path
         self.urdf_object = None
         self.links: Dict[str, URDFLink] = {}
         self.joints: Dict[str, URDFJoint] = {}
         self.robot_name = "unknown_robot"
+        
+        # Mesh processing settings
+        self.enable_mesh_optimization = enable_mesh_optimization
+        self.max_mesh_faces = 10000  # Face limit for performance
+        self.mesh_simplification_ratio = 0.5  # Reduction ratio
+        
+        # Path resolution context
+        self._urdf_dir = None
         
     def is_available(self) -> bool:
         """Check if URDF loading is available"""
@@ -76,7 +102,7 @@ class URDFLoader:
         return URDF_LIBRARY or "none"
         
     def load_urdf(self, urdf_path: str) -> bool:
-        """Load URDF file with automatic library detection"""
+        """Load URDF file with enhanced mesh support"""
         if not self.is_available():
             print("❌ No URDF parsing library available")
             return False
@@ -84,6 +110,9 @@ class URDFLoader:
         if not os.path.exists(urdf_path):
             print(f"❌ URDF file not found: {urdf_path}")
             return False
+        
+        # Store URDF directory for relative path resolution
+        self._urdf_dir = os.path.dirname(os.path.abspath(urdf_path))
         
         try:
             if URDF_LIBRARY == "yourdfpy":
@@ -122,11 +151,12 @@ class URDFLoader:
             self._process_joint_yourdfpy(joint)
     
     def _process_link_yourdfpy(self, link):
-        """Process a link from yourdfpy"""
+        """Enhanced link processing with mesh support and optimization"""
         urdf_link = URDFLink(
             name=link.name,
             geometry_type="unknown",
-            geometry_params={}
+            geometry_params={},
+            mesh_metadata={}
         )
         
         # Extract visual information
@@ -153,19 +183,25 @@ class URDFLoader:
                             'radius': getattr(geom.sphere, 'radius', 0.1)
                         }
                     elif hasattr(geom, 'mesh') and geom.mesh:
+                        # Enhanced mesh processing
                         urdf_link.geometry_type = "mesh"
-                        urdf_link.mesh_path = getattr(geom.mesh, 'filename', None)
+                        original_path = getattr(geom.mesh, 'filename', None)
+                        urdf_link.original_mesh_path = original_path
+                        urdf_link.mesh_path = self._resolve_mesh_path(original_path)
                         urdf_link.geometry_params = {
-                            'scale': getattr(geom.mesh, 'scale', [1.0, 1.0, 1.0])
+                            'scale': getattr(geom.mesh, 'scale', [1.0, 1.0, 1.0]),
+                            'original_path': original_path
                         }
+                        
+                        # Analyze mesh file if found
+                        if urdf_link.mesh_path:
+                            urdf_link.mesh_metadata = self._analyze_mesh_file(urdf_link.mesh_path)
                 
-                # Extract material/color
-                if hasattr(visual, 'material') and visual.material:
-                    if hasattr(visual.material, 'color') and visual.material.color:
-                        if hasattr(visual.material.color, 'rgba'):
-                            rgba = visual.material.color.rgba
-                            urdf_link.color = tuple(rgba)
-                            print(f"    Material color for {link.name}: rgba={rgba}")
+                # Extract visual origin (pose)
+                self._extract_visual_origin(visual, urdf_link)
+                
+                # Enhanced material/color extraction
+                self._extract_material_info(visual, urdf_link)
         
         self.links[link.name] = urdf_link
     
@@ -242,6 +278,174 @@ class URDFLoader:
         
         self.joints[joint.name] = urdf_joint
     
+    def _resolve_mesh_path(self, mesh_path: str) -> Optional[str]:
+        """
+        Resolve mesh file path from URDF reference
+        
+        Args:
+            mesh_path: Original mesh path from URDF (may be package:// URL or relative)
+            
+        Returns:
+            Absolute path to mesh file or None if not found
+        """
+        if not mesh_path:
+            return None
+        
+        # Handle package:// URLs
+        if mesh_path.startswith('package://'):
+            # Remove package:// prefix and get relative path
+            package_relative = mesh_path[10:]  # Remove 'package://'
+            
+            # Try to find in current URDF directory tree
+            if self._urdf_dir:
+                # Look for common ROS structure patterns
+                potential_paths = [
+                    os.path.join(self._urdf_dir, '..', package_relative),  # Go up one level
+                    os.path.join(self._urdf_dir, package_relative),       # Same level
+                    os.path.join(self._urdf_dir, '..', '..', package_relative),  # Up two levels
+                ]
+                
+                for path in potential_paths:
+                    abs_path = os.path.abspath(path)
+                    if os.path.exists(abs_path):
+                        print(f"  🔗 Resolved package path: {mesh_path} -> {abs_path}")
+                        return abs_path
+        
+        # Handle absolute paths
+        if os.path.isabs(mesh_path) and os.path.exists(mesh_path):
+            return mesh_path
+        
+        # Handle relative paths
+        if self._urdf_dir:
+            relative_path = os.path.join(self._urdf_dir, mesh_path)
+            if os.path.exists(relative_path):
+                return os.path.abspath(relative_path)
+        
+        print(f"⚠️ Could not resolve mesh path: {mesh_path}")
+        return None
+    
+    def _analyze_mesh_file(self, mesh_path: str) -> Dict:
+        """
+        Analyze mesh file and extract metadata for optimization
+        
+        Args:
+            mesh_path: Path to mesh file
+            
+        Returns:
+            Dictionary with mesh analysis results
+        """
+        metadata = {
+            'file_size_mb': 0.0,
+            'face_count': 0,
+            'vertex_count': 0,
+            'format': 'unknown',
+            'needs_simplification': False,
+            'loadable': False
+        }
+        
+        try:
+            # Get file size
+            file_size = os.path.getsize(mesh_path)
+            metadata['file_size_mb'] = round(file_size / (1024 * 1024), 2)
+            
+            # Get file format
+            _, ext = os.path.splitext(mesh_path)
+            metadata['format'] = ext.lower().lstrip('.')
+            
+            # Analyze with trimesh if available
+            if TRIMESH_AVAILABLE and trimesh:
+                try:
+                    mesh = trimesh.load(mesh_path)
+                    if hasattr(mesh, 'faces') and hasattr(mesh, 'vertices'):
+                        metadata['face_count'] = len(mesh.faces)
+                        metadata['vertex_count'] = len(mesh.vertices)
+                        metadata['loadable'] = True
+                        
+                        # Check if simplification needed
+                        if metadata['face_count'] > self.max_mesh_faces:
+                            metadata['needs_simplification'] = True
+                            
+                        print(f"    📊 Mesh: {metadata['vertex_count']} vertices, "
+                              f"{metadata['face_count']} faces, {metadata['file_size_mb']} MB")
+                    else:
+                        print(f"    ⚠️ Loaded mesh has no geometry data")
+                except Exception as e:
+                    print(f"    ⚠️ Mesh analysis failed: {e}")
+            else:
+                # Assume loadable if trimesh not available
+                metadata['loadable'] = True
+                print(f"    📁 Mesh file found: {os.path.basename(mesh_path)} ({metadata['file_size_mb']} MB)")
+            
+        except Exception as e:
+            print(f"    ❌ Could not analyze mesh file {mesh_path}: {e}")
+        
+        return metadata
+    
+    def _extract_visual_origin(self, visual, urdf_link: URDFLink):
+        """Extract visual origin (pose) information from URDF visual element"""
+        from core.simulation_object import Pose
+        
+        # Default pose (no transformation)
+        origin_pos = np.array([0.0, 0.0, 0.0])
+        origin_rot = Rotation.identity()
+        
+        # Extract origin if present
+        if hasattr(visual, 'origin') and visual.origin is not None:
+            try:
+                # Handle different origin representations
+                if hasattr(visual.origin, 'xyz') and hasattr(visual.origin, 'rpy'):
+                    # xyz and rpy attributes
+                    if visual.origin.xyz is not None:
+                        origin_pos = np.array(visual.origin.xyz)
+                    if visual.origin.rpy is not None:
+                        origin_rot = Rotation.from_euler('xyz', visual.origin.rpy)
+                elif hasattr(visual.origin, 'reshape'):
+                    # Transformation matrix
+                    transform_matrix = visual.origin.reshape(4, 4)
+                    origin_pos = transform_matrix[:3, 3]
+                    rotation_matrix = transform_matrix[:3, :3]
+                    origin_rot = Rotation.from_matrix(rotation_matrix)
+                else:
+                    # Try to extract from matrix directly
+                    origin_matrix = np.array(visual.origin)
+                    if origin_matrix.shape == (4, 4):
+                        origin_pos = origin_matrix[:3, 3]
+                        rotation_matrix = origin_matrix[:3, :3]
+                        origin_rot = Rotation.from_matrix(rotation_matrix)
+            except Exception as e:
+                print(f"    ⚠️ Warning: Could not process visual origin for {urdf_link.name}: {e}")
+        
+        # Store pose in URDFLink
+        urdf_link.pose = Pose.from_position_rotation(origin_pos, origin_rot)
+        
+        # Debug output
+        if not np.allclose(origin_pos, [0, 0, 0]) or not np.allclose(origin_rot.as_euler('xyz'), [0, 0, 0]):
+            pos_str = f"pos={origin_pos}"
+            rot_euler = origin_rot.as_euler('xyz', degrees=True)
+            rot_str = f"rot={rot_euler}°"
+            print(f"    📍 Visual origin for {urdf_link.name}: {pos_str}, {rot_str}")
+    
+    def _extract_material_info(self, visual, urdf_link: URDFLink):
+        """Enhanced material and color extraction"""
+        # Try standard material color first
+        if hasattr(visual, 'material') and visual.material:
+            if hasattr(visual.material, 'color') and visual.material.color:
+                if hasattr(visual.material.color, 'rgba'):
+                    rgba = visual.material.color.rgba
+                    urdf_link.color = tuple(rgba)
+                    print(f"    🎨 Material color for {urdf_link.name}: rgba={rgba}")
+                    return
+        
+        # Assign default colors based on geometry type
+        default_colors = {
+            'box': (0.8, 0.4, 0.2, 1.0),      # Orange
+            'cylinder': (0.2, 0.8, 0.4, 1.0), # Green  
+            'sphere': (0.4, 0.2, 0.8, 1.0),   # Purple
+            'mesh': (0.6, 0.6, 0.6, 1.0)      # Gray
+        }
+        
+        urdf_link.color = default_colors.get(urdf_link.geometry_type, (0.7, 0.7, 0.7, 1.0))
+    
     def get_mesh_files(self) -> List[str]:
         """Get list of mesh files referenced in URDF"""
         mesh_files = []
@@ -280,7 +484,30 @@ class URDFLoader:
                     if TRIMESH_AVAILABLE:
                         # Load with trimesh then convert to PyVista
                         trimesh_mesh = trimesh.load(link.mesh_path)
-                        pv_mesh = pv_module.wrap(trimesh_mesh.vertices, trimesh_mesh.faces)
+                        
+                        # Apply scaling if specified
+                        scale = link.geometry_params.get('scale', [1.0, 1.0, 1.0])
+                        if scale != [1.0, 1.0, 1.0]:
+                            trimesh_mesh.apply_scale(scale)
+                        
+                        # Optimize mesh if needed
+                        if (self.enable_mesh_optimization and 
+                            link.mesh_metadata and 
+                            link.mesh_metadata.get('needs_simplification', False)):
+                            # Simplify mesh for better performance
+                            original_faces = len(trimesh_mesh.faces)
+                            simplified_mesh = trimesh_mesh.simplify_quadrics(
+                                face_count=int(original_faces * self.mesh_simplification_ratio)
+                            )
+                            if simplified_mesh is not None:
+                                trimesh_mesh = simplified_mesh
+                                print(f"    🔄 Simplified mesh: {original_faces} -> {len(trimesh_mesh.faces)} faces")
+                        
+                        # Convert to PyVista
+                        if hasattr(trimesh_mesh, 'vertices') and hasattr(trimesh_mesh, 'faces'):
+                            pv_mesh = pv_module.wrap(trimesh_mesh.vertices, trimesh_mesh.faces)
+                        else:
+                            raise Exception("Mesh has no geometry data")
                     else:
                         # Fallback to box
                         pv_mesh = pv_module.Cube()

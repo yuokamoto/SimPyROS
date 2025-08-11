@@ -11,8 +11,8 @@ import math
 import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from simulation_object import Pose
-from pyvista_visualizer import (
+from core.simulation_object import Pose
+from core.pyvista_visualizer import (
     create_headless_visualizer, 
     setup_basic_scene
 )

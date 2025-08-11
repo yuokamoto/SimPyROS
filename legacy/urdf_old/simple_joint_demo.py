@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
 Simple Joint Motion Demo - 確実に関節の動きが見えるシンプルなデモ
+
+⚠️  LEGACY VERSION - For educational/reference purposes
+📚  This shows manual implementation approach
+🚀  For new projects, use joint_demo.py with the integrated URDFRobotVisualizer library!
+
+New simplified usage:
+  python joint_demo.py 15 --mode simple
+  python simple_urdf_demo.py
 """
 
 import sys

@@ -10,9 +10,13 @@ import math
 import time
 from typing import Optional, Tuple, List, Dict, Union
 
+# Add parent directory to path
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 # Import URDF loaders in order of preference
 try:
-    from urdf_loader import URDFLoader
+    from core.urdf_loader import URDFLoader
     URDF_SUPPORT = True
 except ImportError:
     URDF_SUPPORT = False
@@ -287,7 +291,7 @@ class SceneBuilder:
             
     @staticmethod
     def add_coordinate_axes(plotter, pv_module,
-                           length: float = 1.5,
+                           length: float = 1.0,
                            origin: Tuple[float, float, float] = (0, 0, 0)):
         """Add coordinate axes to scene"""
         try:
@@ -389,7 +393,7 @@ class AnimationController:
             print(f"Error adding robot {name}: {e}")
             return False
     
-    def update_robot_pose_efficient(self, name: str, pose):
+    def update_robot_pose(self, name: str, pose):
         """Efficiently update robot pose using transformation matrix only"""
         if name not in self.actors or name not in self.original_meshes:
             return False
@@ -489,12 +493,7 @@ class AnimationController:
         except Exception as e:
             print(f"Error updating robot {name}: {e}")
             return False
-    
-    def update_robot_pose(self, name: str, pose, mesh_creator_func=None):
-        """Update robot pose - optimized version that doesn't recreate meshes"""
-        # Use the efficient method by default
-        return self.update_robot_pose_efficient(name, pose)
-            
+                
     def add_trajectory_trail(self, name: str, 
                            color: str = 'yellow', 
                            line_width: int = 3):
@@ -536,7 +535,7 @@ def setup_basic_scene(visualizer: PyVistaVisualizer) -> bool:
     return success
 
 
-# Robot mesh creation function
+# Robot mesh creation functions
 def create_robot_mesh_from_urdf(visualizer: PyVistaVisualizer, urdf_path: str = None, package_path: str = None):
     """Create a robot mesh from URDF file"""
     if not visualizer.available:
@@ -546,3 +545,243 @@ def create_robot_mesh_from_urdf(visualizer: PyVistaVisualizer, urdf_path: str = 
         print("URDF path required for robot_type='urdf'")
         return None
     return RobotMeshFactory.create_from_urdf(visualizer.pv, urdf_path, package_path)
+
+
+class URDFRobotVisualizer(PyVistaVisualizer):
+    """
+    Extended PyVista visualizer with integrated URDF robot loading and visualization
+    
+    Features:
+    - Load robots directly from URDF files
+    - Real-time joint motion visualization  
+    - Individual link coloring and management
+    - Simple load -> set_joint_command workflow
+    """
+    
+    def __init__(self, interactive: bool = True, window_size: Tuple[int, int] = (1200, 800)):
+        """Initialize URDF robot visualizer"""
+        super().__init__(interactive, window_size)
+        
+        # Robot management
+        self.robots: Dict[str, Any] = {}  # Store robot objects
+        self.urdf_loaders: Dict[str, Any] = {}  # Store URDF loaders
+        self.link_actors: Dict[str, Dict[str, Any]] = {}  # Store link actors per robot
+        self.animation_controllers: Dict[str, AnimationController] = {}
+        
+        # Setup basic scene if available
+        if self.available:
+            setup_basic_scene(self)
+    
+    def load_robot(self, robot_name: str, robot_instance, urdf_path: str) -> bool:
+        """
+        Load a robot for visualization and control
+        
+        Args:
+            robot_name: Unique name for this robot instance
+            robot_instance: Robot object from robot.py
+            urdf_path: Path to URDF file
+            
+        Returns:
+            bool: Success status
+        """
+        if not self.available:
+            print("❌ PyVista not available")
+            return False
+        
+        print(f"🤖 Loading robot '{robot_name}' from {urdf_path}")
+        
+        try:
+            # Import URDF loader locally to avoid circular imports
+            from core.urdf_loader import URDFLoader
+            
+            # Create URDF loader
+            urdf_loader = URDFLoader()
+            if not urdf_loader.load_urdf(urdf_path):
+                print(f"❌ Failed to load URDF: {urdf_path}")
+                return False
+            
+            # Store robot and loader
+            self.robots[robot_name] = robot_instance
+            self.urdf_loaders[robot_name] = urdf_loader
+            
+            # Create individual link meshes with real-time updates
+            self._create_robot_link_actors(robot_name)
+            
+            # Create animation controller for this robot
+            animation_controller = AnimationController(self.plotter, self.pv)
+            self.animation_controllers[robot_name] = animation_controller
+            
+            print(f"✅ Robot '{robot_name}' loaded successfully")
+            urdf_loader.print_info()
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to load robot '{robot_name}': {e}")
+            return False
+    
+    def _create_robot_link_actors(self, robot_name: str):
+        """Create individual link actors for a robot"""
+        urdf_loader = self.urdf_loaders[robot_name]
+        link_actors = {}
+        
+        print(f"🎨 Creating individual link meshes for '{robot_name}'...")
+        
+        for link_name, link_info in urdf_loader.links.items():
+            # Create mesh based on geometry type
+            mesh = None
+            
+            if link_info.geometry_type == "box":
+                size = link_info.geometry_params.get('size', [0.3, 0.3, 0.1])
+                mesh = self.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
+                
+            elif link_info.geometry_type == "cylinder":
+                radius = link_info.geometry_params.get('radius', 0.05)
+                length = link_info.geometry_params.get('length', 0.35)
+                mesh = self.pv.Cylinder(radius=radius, height=length, direction=(0, 0, 1))
+                
+            elif link_info.geometry_type == "sphere":
+                radius = link_info.geometry_params.get('radius', 0.08)
+                mesh = self.pv.Sphere(radius=radius)
+            
+            if mesh is not None:
+                # Apply visual origin transformation if present
+                if hasattr(link_info, 'pose') and link_info.pose is not None:
+                    transform_matrix = link_info.pose.to_transformation_matrix()
+                    mesh.transform(transform_matrix, inplace=True)
+                    
+                    # Debug output for non-identity transformations
+                    pos = link_info.pose.position
+                    if not all(abs(x) < 0.001 for x in pos):
+                        print(f"    🔧 Applied visual origin to {link_name}: pos={pos}")
+                
+                # Add to scene with link color
+                color = link_info.color[:3]  # RGB only
+                actor = self.plotter.add_mesh(
+                    mesh, 
+                    color=color, 
+                    opacity=0.8, 
+                    name=f"{robot_name}_{link_name}"
+                )
+                link_actors[link_name] = {
+                    'actor': actor,
+                    'mesh': mesh.copy(),  # Store original mesh
+                    'color': color,
+                    'geometry_type': link_info.geometry_type
+                }
+                print(f"  Added {link_name}: {link_info.geometry_type} with color {color}")
+        
+        self.link_actors[robot_name] = link_actors
+        print(f"✅ Created {len(link_actors)} individual links for '{robot_name}'")
+    
+    def update_robot_visualization(self, robot_name: str):
+        """Update robot visualization based on current joint positions"""
+        if robot_name not in self.robots or robot_name not in self.link_actors:
+            return False
+        
+        try:
+            robot = self.robots[robot_name]
+            link_actors = self.link_actors[robot_name]
+            
+            # Get current link poses from robot's forward kinematics
+            link_poses = robot.get_link_poses()
+            
+            for link_name, pose in link_poses.items():
+                if link_name in link_actors and pose is not None:
+                    # Create transformation matrix
+                    transform_matrix = pose.to_transformation_matrix()
+                    
+                    # Update mesh position
+                    original_mesh = link_actors[link_name]['mesh'].copy()
+                    original_mesh.transform(transform_matrix)
+                    
+                    # Update the actor
+                    actor = link_actors[link_name]['actor']
+                    if hasattr(actor, 'GetMapper'):
+                        mapper = actor.GetMapper()
+                        mapper.SetInputData(original_mesh)
+                        mapper.Modified()
+            
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Error updating robot visualization '{robot_name}': {e}")
+            return False
+    
+    def set_joint_command(self, robot_name: str, joint_name: str, position: float, max_velocity: Optional[float] = None):
+        """
+        Simple interface to set joint position and update visualization
+        
+        Args:
+            robot_name: Name of the robot
+            joint_name: Name of the joint to move
+            position: Target position in radians
+            max_velocity: Maximum velocity (optional)
+        """
+        if robot_name not in self.robots:
+            print(f"❌ Robot '{robot_name}' not found")
+            return False
+        
+        robot = self.robots[robot_name]
+        robot.set_joint_position(joint_name, position, max_velocity)
+        
+        # Update visualization immediately
+        return self.update_robot_visualization(robot_name)
+    
+    def set_joint_commands(self, robot_name: str, joint_positions: Dict[str, float], max_velocity: Optional[float] = None):
+        """
+        Set multiple joint positions simultaneously
+        
+        Args:
+            robot_name: Name of the robot
+            joint_positions: Dictionary of joint_name -> position
+            max_velocity: Maximum velocity for all joints
+        """
+        if robot_name not in self.robots:
+            print(f"❌ Robot '{robot_name}' not found")
+            return False
+        
+        robot = self.robots[robot_name]
+        robot.set_joint_positions(joint_positions, max_velocity)
+        
+        # Update visualization immediately
+        return self.update_robot_visualization(robot_name)
+    
+    def get_robot_info(self, robot_name: str) -> Optional[Dict]:
+        """Get robot information including joint names and current positions"""
+        if robot_name not in self.robots:
+            return None
+        
+        robot = self.robots[robot_name]
+        return {
+            'joint_names': robot.get_joint_names(),
+            'joint_positions': robot.get_joint_positions(),
+            'joint_velocities': robot.get_joint_velocities(),
+            'movable_joints': [name for name in robot.get_joint_names() 
+                             if robot.joints[name].joint_type.value != 'fixed']
+        }
+    
+    def start_continuous_update(self, robot_name: str, update_rate: float = 60.0):
+        """Start continuous visualization updates (for real-time animation)"""
+        if robot_name not in self.robots:
+            return False
+        
+        import threading
+        import time
+        
+        def update_loop():
+            dt = 1.0 / update_rate
+            while robot_name in self.robots:
+                self.update_robot_visualization(robot_name)
+                time.sleep(dt)
+        
+        thread = threading.Thread(target=update_loop)
+        thread.daemon = True
+        thread.start()
+        return True
+
+
+# Convenience functions for URDF robot visualization
+def create_urdf_robot_visualizer(interactive: bool = True, window_size: Tuple[int, int] = (1200, 800)) -> URDFRobotVisualizer:
+    """Create a URDF robot visualizer with basic scene setup"""
+    return URDFRobotVisualizer(interactive, window_size)
+

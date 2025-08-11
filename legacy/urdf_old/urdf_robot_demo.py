@@ -5,16 +5,16 @@ Focused demonstration of loading and visualizing robots from URDF files
 This demo requires a URDF file and demonstrates URDF-specific features
 
 Usage:
-    python examples/pyvista/urdf_robot_demo.py <duration> <urdf_path> [options]
+    python examples/urdf/urdf_robot_demo.py <duration> <urdf_path> [options]
     
 Options:
     --headless           Force headless mode (no GUI window)  
     --screenshots        Save screenshots to ../../output/ directory
     
 Examples:
-    python examples/pyvista/urdf_robot_demo.py 15 examples/robots/simple_robot.urdf
-    python examples/pyvista/urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf --headless
-    python examples/pyvista/urdf_robot_demo.py 5 examples/robots/rotation_test.urdf --screenshots
+    python examples/urdf/urdf_robot_demo.py 15 examples/robots/simple_robot.urdf
+    python examples/urdf/urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf --headless
+    python examples/urdf/urdf_robot_demo.py 5 examples/robots/rotation_test.urdf --screenshots
 """
 
 import sys
@@ -40,7 +40,7 @@ def print_urdf_info(urdf_path):
         return False
     
     try:
-        from urdf_loader import URDFLoader
+        from core.urdf_loader import URDFLoader
         loader = URDFLoader()
         
         print(f"\n📄 URDF File Analysis: {urdf_path}")
@@ -198,7 +198,7 @@ def setup_urdf_visualization(robot, target, urdf_path):
     
     # Display URDF information
     try:
-        from urdf_loader import URDFLoader
+        from core.urdf_loader import URDFLoader
         loader = URDFLoader()
         if loader.load_urdf(urdf_path):
             urdf_info = f"Links: {len(loader.links)}, Joints: {len(loader.joints)}"

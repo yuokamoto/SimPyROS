@@ -21,41 +21,49 @@ python -c "from urdf_loader import URDFLoader; loader = URDFLoader(); print('URD
 
 ## 🤖 URDF Robot Demos
 
-### 🎬 `urdf_robot_demo.py` - Complete URDF Visualization ⭐ **Recommended**
+### 🌟 **NEW**: `joint_demo.py` - Unified Joint Control ⭐ **RECOMMENDED**
+```bash
+# Unified demo with 3 modes (combines simple + realtime approaches)
+python joint_demo.py 15                                    # Mixed mode (default)
+python joint_demo.py 20 ../robots/simple_robot.urdf       # With specific URDF
+python joint_demo.py 25 --mode simple                     # Gentle joint motion
+python joint_demo.py 30 --mode realtime                   # Fast coordinated motion
+python joint_demo.py 15 --headless                        # Headless with screenshot
+```
+**Features**: 3 motion modes, integrated URDFRobotVisualizer library, one-line joint control
+
+### 🚀 **NEW**: `simple_urdf_demo.py` - Library Usage Example
+```bash
+# Shows how easy the new URDFRobotVisualizer makes everything
+python simple_urdf_demo.py
+```
+**Features**: Step-by-step library usage, ultra-simple robot control, educational
+
+---
+
+### 🎬 `urdf_robot_demo.py` - Complete URDF Visualization
 ```bash
 # Load and visualize URDF robots with material colors
-# When run from SimPyROS root directory:
-python examples/urdf/urdf_robot_demo.py 15 examples/robots/simple_robot.urdf
-python examples/urdf/urdf_robot_demo.py 10 examples/robots/mobile_robot.urdf
-
-# When run from examples/urdf/ directory:
-python urdf_robot_demo.py 10 ../robots/simple_robot.urdf
-python urdf_robot_demo.py 15 ../robots/mobile_robot.urdf
-
-# Headless mode for servers/CI
-python urdf_robot_demo.py 5 ../robots/simple_robot.urdf --headless
-
-# Headless with screenshot capture
+python urdf_robot_demo.py 15 ../robots/simple_robot.urdf
 python urdf_robot_demo.py 10 ../robots/mobile_robot.urdf --headless --screenshots
 ```
 **Features**: URDF parsing, individual link colors, material support, interactive 3D controls
 
-### 🔧 `simple_joint_demo.py` - Joint Motion Basics
+### 📚 `simple_joint_demo.py` - Joint Motion Basics **[LEGACY]**
 ```bash
-# Visual demonstration of joint movement
+# Visual demonstration of joint movement (manual implementation)
 python simple_joint_demo.py
 ```
-**Features**: Simple geometric shapes, clear joint motion, educational focus
+**Features**: Educational reference, manual PyVista usage, basic joint concepts
+**⚠️ For new projects, use `joint_demo.py --mode simple` instead**
 
-### ⚡ `realtime_joint_demo.py` - Advanced Joint Control
+### 📚 `realtime_joint_demo.py` - Advanced Joint Control **[LEGACY]**  
 ```bash
-# Real-time joint animation with URDF robots
+# Real-time joint animation (manual implementation)
 python realtime_joint_demo.py 20
-
-# Shorter demo
-python realtime_joint_demo.py 10
 ```
-**Features**: URDF-based joint control, real-time link pose updates, multi-phase motion patterns
+**Features**: Advanced manual implementation, RealTimeJointVisualizer class
+**⚠️ For new projects, use `joint_demo.py --mode realtime` instead**
 
 ### 🎯 `joint_motion_demo.py` - Structured Joint Patterns
 ```bash

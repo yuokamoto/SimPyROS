@@ -1,13 +1,30 @@
 # Legacy Code - SimPyROS
 
-This directory contains legacy visualization backends and examples that were used before PyVista became the primary 3D visualization backend.
+This directory contains legacy code that was replaced by the new SimulationManager-based architecture. These files are preserved for reference and historical purposes.
 
 ## Directory Structure
 
-### `examples/` - Legacy Example Files
-- `basic_demo.py` - Basic matplotlib-based visualization demo
+### `examples/` - Original Example Files
+- `realtime_demo.py` - Original matplotlib-based visualization demo
 - `visualization_demo.py` - Matplotlib 3D animation with speed control
 - `realtime_demo_simple.py` - Lightweight real-time data processing
+
+### `urdf_old/` - Legacy URDF Processing Examples **[Moved from examples/urdf/]**
+**Original URDF examples replaced by `examples/simple/` architecture**
+- `joint_demo.py` - Manual joint control implementation
+- `urdf_robot_demo.py` - Original URDF robot visualization
+- `simple_joint_demo.py` - Basic joint movement demo
+- `realtime_joint_demo.py` - Advanced joint control (manual implementation)
+- `robot_visualization_demo.py` - Complete robot system demo
+
+### `basic_old/` - Foundation Examples **[Moved from examples/basic/]**
+**Basic concepts replaced by simplified SimulationManager examples**
+- `basic_demo.py` - Original SimPyROS foundation demo
+
+### Moved Files from `examples/`
+- `robot_demo.py` - Original robot class demonstration  
+- `demo_without_scipy.py` - Temporary scipy version conflict workaround
+- `visualization_demos.py` - Separated visualization functions
 - `simpy_rt_demo.py` - SimPy.rt alternative implementation
 
 ### `backends/` - Alternative Visualization Backends

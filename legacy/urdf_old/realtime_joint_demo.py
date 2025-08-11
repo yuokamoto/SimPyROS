@@ -2,6 +2,15 @@
 """
 Real-time Joint Motion Visualization Demo
 リアルタイムで関節の動きが見える特別なデモ
+
+⚠️  LEGACY VERSION - For educational/reference purposes
+📚  This shows advanced manual implementation with RealTimeJointVisualizer class
+🚀  For new projects, use joint_demo.py with the integrated URDFRobotVisualizer library!
+
+New simplified usage:
+  python joint_demo.py 20 --mode realtime
+  python joint_demo.py 15 --mode mixed
+  python simple_urdf_demo.py
 """
 
 import sys
@@ -18,7 +27,7 @@ import simpy
 from robot import create_robot_from_urdf
 from simulation_object import Pose
 from pyvista_visualizer import PyVistaVisualizer
-from urdf_loader import URDFLoader
+from core.urdf_loader import URDFLoader
 
 
 class RealTimeJointVisualizer:
@@ -165,7 +174,7 @@ def realtime_joint_demo(duration: float = 20.0):
     visualizer.plotter.add_mesh(ground, color='lightgray', opacity=0.2)
     
     print("✅ Real-time visualization setup complete")
-    
+    setup_urdf_visualization
     # Enhanced joint control with visual feedback
     def joint_control_process():
         """視覚フィードバック付き関節制御"""
