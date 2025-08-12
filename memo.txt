@@ -42,9 +42,7 @@
 8. SimulationManager
 - simulation threadとvisualization threadを用意しているが、SimPyの枠組みでthreadを使う必要ありますか？必要なら理由を明示してください。
 
-todo
-- basic_simulation 次のロボットに自動でイカない。
-- real time factor 
-- connect 
-- mesh
-- ros2
+9.others
+- meshが半透明のまま
+- 現在のシミュレーション経過時間を表示してほしい。
+- ボタンと文字を小さくして、文字をボタンの上に重ねてほしい

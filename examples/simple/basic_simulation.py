@@ -22,108 +22,120 @@ from core.simulation_object import Velocity, Pose
 
 
 def simple_control_example():
-    """Example 1: Step-by-step approach """
+    """Example 1: Simple joint control with auto-close"""
     print("🤖 Simple Control Example")
     print("=" * 40)
     
-    # Step 1: Create simulation manager
     sim = SimulationManager()
     
-    # Step 2: Add robot from URDF  
-    robot = sim.add_robot_from_urdf(
-        name="my_robot",
-        urdf_path="examples/robots/articulated_arm_robot.urdf"
-    )
-    
-    # Step 3: Define control function
-    def my_control(dt: float):
-        """Simple sinusoidal joint motion"""
-        t = time.time()
+    try:
+        robot = sim.add_robot_from_urdf(
+            name="my_robot",
+            urdf_path="examples/robots/articulated_arm_robot.urdf"
+        )
         
-        # Get movable joints
-        joint_names = [name for name in robot.get_joint_names() 
-                      if robot.joints[name].joint_type.value != 'fixed']
+        def my_control(dt: float):
+            """Simple sinusoidal joint motion"""
+            t = time.time()
+            joint_names = [name for name in robot.get_joint_names() 
+                          if robot.joints[name].joint_type.value != 'fixed']
+            
+            for i, joint_name in enumerate(joint_names):
+                position = 0.5 * math.sin(t + i * math.pi / 3)
+                sim.set_robot_joint_position("my_robot", joint_name, position)
         
-        # Set joint positions
-        for i, joint_name in enumerate(joint_names):
-            position = 0.5 * math.sin(t + i * math.pi / 3)
-            sim.set_robot_joint_position("my_robot", joint_name, position)
-    
-    # Step 4: Set control callback and run
-    sim.set_robot_control_callback("my_robot", my_control, frequency=20.0)
-    sim.run(duration=10.0)  # Run for 10 seconds
-    
-    print("✅ Simple control example completed")
+        sim.set_robot_control_callback("my_robot", my_control, frequency=20.0)
+        sim.run(duration=1.0, auto_close=True)
+        
+    except Exception as e:
+        print(f"⚠️ Example error: {e}")
+    finally:
+        try:
+            sim.shutdown()
+        except:
+            pass
 
 
 def mobile_robot_example():
-    """Example 2: Mobile robot with velocity control"""
-    print("\n🚗 Mobile Robot Example")
+    """Example 2: Mobile robot with auto-close"""
+    print("🚗 Mobile Robot Example")
     print("=" * 40)
     
     sim = SimulationManager()
-    robot = sim.add_robot_from_urdf(
-        name="mobile_robot", 
-        urdf_path="examples/robots/mobile_robot.urdf"
-    )
     
-    def mobile_control(dt: float):
-        """Move robot in circle"""
-        t = time.time()
-        linear_speed = 0.5
-        angular_speed = 0.3
-        
-        # Set base velocity (mobile robot movement)  
-        velocity = Velocity(
-            linear_x=linear_speed,
-            angular_z=angular_speed * math.sin(t * 0.5)
+    try:
+        robot = sim.add_robot_from_urdf(
+            name="mobile_robot", 
+            urdf_path="examples/robots/mobile_robot.urdf"
         )
-        sim.set_robot_velocity("mobile_robot", velocity)
-    
-    sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=30.0)
-    sim.run(duration=8.0)
-    
-    print("✅ Mobile robot example completed")
+        
+        def mobile_control(dt: float):
+            """Move robot in circle"""
+            t = time.time()
+            linear_speed = 0.5
+            angular_speed = 0.3
+            
+            velocity = Velocity(
+                linear_x=linear_speed,
+                angular_z=angular_speed * math.sin(t * 0.5)
+            )
+            sim.set_robot_velocity("mobile_robot", velocity)
+        
+        sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=30.0)
+        sim.run(duration=1.0, auto_close=True)
+        
+    except Exception as e:
+        print(f"⚠️ Example error: {e}")
+    finally:
+        try:
+            sim.shutdown()
+        except:
+            pass
 
 
 def multi_robot_example():
-    """Example 3: Multiple robots"""
-    print("\n🤖🤖 Multi-Robot Example")  
+    """Example 3: Multi-robot with auto-close"""
+    print("🤖🤖 Multi-Robot Example")  
     print("=" * 40)
     
     sim = SimulationManager()
     
-    # Add multiple robots
-    robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0))
-    robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0))
-    
-    def control_robot1(dt):
-        """Control first robot"""
-        t = time.time()
-        joint_names = [name for name in robot1.get_joint_names() 
-                      if robot1.joints[name].joint_type.value != 'fixed']
+    try:
+        robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0))
+        robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0))
         
-        for i, joint_name in enumerate(joint_names):
-            position = 0.3 * math.sin(t * 2 + i)
-            sim.set_robot_joint_position("robot1", joint_name, position)
-    
-    def control_robot2(dt):
-        """Control second robot"""  
-        t = time.time()
-        joint_names = [name for name in robot2.get_joint_names() 
-                      if robot2.joints[name].joint_type.value != 'fixed']
+        def control_robot1(dt):
+            """Control first robot"""
+            t = time.time()
+            joint_names = [name for name in robot1.get_joint_names() 
+                          if robot1.joints[name].joint_type.value != 'fixed']
+            
+            for i, joint_name in enumerate(joint_names):
+                position = 0.3 * math.sin(t * 2 + i)
+                sim.set_robot_joint_position("robot1", joint_name, position)
         
-        for i, joint_name in enumerate(joint_names):
-            position = 0.4 * math.cos(t * 1.5 + i * math.pi / 2)
-            sim.set_robot_joint_position("robot2", joint_name, position)
-    
-    # Set different control frequencies
-    sim.set_robot_control_callback("robot1", control_robot1, frequency=15.0)
-    sim.set_robot_control_callback("robot2", control_robot2, frequency=10.0)
-    
-    sim.run(duration=12.0)
-    
-    print("✅ Multi-robot example completed")
+        def control_robot2(dt):
+            """Control second robot"""  
+            t = time.time()
+            joint_names = [name for name in robot2.get_joint_names() 
+                          if robot2.joints[name].joint_type.value != 'fixed']
+            
+            for i, joint_name in enumerate(joint_names):
+                position = 0.4 * math.cos(t * 1.5 + i * math.pi / 2)
+                sim.set_robot_joint_position("robot2", joint_name, position)
+        
+        sim.set_robot_control_callback("robot1", control_robot1, frequency=15.0)
+        sim.set_robot_control_callback("robot2", control_robot2, frequency=10.0)
+        
+        sim.run(duration=1.5, auto_close=True)
+        
+    except Exception as e:
+        print(f"⚠️ Example error: {e}")
+    finally:
+        try:
+            sim.shutdown()
+        except:
+            pass
 
 
 def headless_example():
@@ -171,7 +183,7 @@ def headless_example():
 
 
 def main():
-    """Run all examples"""
+    """Run all examples with automatic progression"""
     print("🚀 SimPyROS Simplified Simulation Examples")
     print("This demonstrates the new SimulationManager interface")
     print("=" * 60)
@@ -183,11 +195,18 @@ def main():
         ("Headless Mode", headless_example)
     ]
     
-    for name, func in examples:
+    for i, (name, func) in enumerate(examples):
         try:
-            print(f"\n▶️ Running: {name}")
+            print(f"\n▶️ Running: {name} ({i+1}/{len(examples)})")
+            
             func()
-            time.sleep(1)  # Brief pause between examples
+            
+            # Brief pause between examples
+            if name != "Headless Mode":
+                print(f"✅ {name} example completed. Next example starting soon...")
+                time.sleep(2.0)
+            else:
+                time.sleep(0.5)  # Short pause for headless
             
         except KeyboardInterrupt:
             print(f"\n⏹️ {name} interrupted by user")

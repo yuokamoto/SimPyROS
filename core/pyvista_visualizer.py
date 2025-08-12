@@ -457,6 +457,10 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         # SimulationManager connection for real-time factor control (8.2)
         self._connected_simulation_manager = None
         
+        # Time display tracking
+        self._simulation_start_time = None
+        self._time_text_actor = None
+        
         # Setup basic scene and controls if available
         if self.available:
             setup_basic_scene(self)
@@ -469,19 +473,18 @@ class URDFRobotVisualizer(PyVistaVisualizer):
             return
         
         try:
-            # Add text labels for buttons
-            self.plotter.add_text("🎯 Axes", position=(70, 20), font_size=10, color='white')
-            
-            # Add checkbox for axis display toggle
+            # Add checkbox for axis display toggle (smaller button with text overlay)
             self.plotter.add_checkbox_button_widget(
                 callback=self._toggle_axis_display,
                 value=self.axis_display_visible,
                 position=(10, 10),
-                size=50,
-                border_size=2,
+                size=30,  # Smaller button
+                border_size=1,
                 color_on='green',
                 color_off='red'
             )
+            # Overlay text on button - larger font and better positioning
+            self.plotter.add_text("🎯", position=(18, 18), font_size=12, color='white')
             
             # Add slider for real-time factor control
             self.plotter.add_slider_widget(
@@ -494,58 +497,64 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                 style='modern'
             )
             
-            # Add collision toggle button with label
-            self.plotter.add_text("🚧 Collision", position=(70, 80), font_size=10, color='white')
+            # Add collision toggle button (smaller with overlay text)
             self.plotter.add_checkbox_button_widget(
                 callback=self._toggle_collision_display,
                 value=self.collision_display_visible,
-                position=(10, 70),
-                size=50,
-                border_size=2,
+                position=(10, 50),
+                size=30,  # Smaller button
+                border_size=1,
                 color_on='yellow',
                 color_off='gray'
             )
+            # Overlay text on button - larger font and better positioning
+            self.plotter.add_text("🚧", position=(18, 58), font_size=12, color='white')
             
-            # Add wireframe toggle button with label  
-            self.plotter.add_text("🕸️ Wire", position=(70, 140), font_size=10, color='white')
+            # Add wireframe toggle button (smaller with overlay text)
             self.plotter.add_checkbox_button_widget(
                 callback=self._toggle_wireframe_mode,
                 value=self.wireframe_mode,
-                position=(10, 130),
-                size=50,
-                border_size=2,
+                position=(10, 90),
+                size=30,  # Smaller button
+                border_size=1,
                 color_on='cyan',
                 color_off='darkgray'
             )
+            # Overlay text on button - larger font and better positioning
+            self.plotter.add_text("🕸️", position=(18, 98), font_size=12, color='white')
             
-            # Add simulation control buttons with labels
-            # Play/Pause button
-            self.plotter.add_text("▶️ Play/Pause", position=(80, 200), font_size=10, color='white')
+            # Add simulation control buttons
+            # Play/Pause button (smaller with overlay text)
             self.plotter.add_checkbox_button_widget(
                 callback=self._toggle_simulation_pause,
                 value=not self.simulation_paused,  # Inverted logic: True = Playing
-                position=(10, 190),
-                size=60,
-                border_size=3,
+                position=(10, 130),
+                size=30,  # Smaller button
+                border_size=1,
                 color_on='green',
                 color_off='orange'
             )
+            # Overlay text on button - larger font and better positioning
+            self.plotter.add_text("▶️", position=(18, 138), font_size=12, color='white')
             
-            # Reset button (single click button) with label
+            # Reset button (smaller with overlay text)
             try:
-                self.plotter.add_text("🔄 Reset", position=(190, 200), font_size=10, color='white')
-                # Note: PyVista doesn't have a dedicated button widget, using checkbox as button
                 self.plotter.add_checkbox_button_widget(
                     callback=self._reset_simulation,
                     value=False,  # Always false, acts as button
-                    position=(150, 190),
-                    size=50,
-                    border_size=2,
+                    position=(50, 130),
+                    size=30,  # Smaller button
+                    border_size=1,
                     color_on='red',
                     color_off='darkred'
                 )
+                # Overlay text on button - larger font and better positioning
+                self.plotter.add_text("🔄", position=(58, 138), font_size=12, color='white')
             except Exception as e:
                 print(f"⚠️ Could not add reset button: {e}")
+            
+            # Add simulation time display
+            self._setup_time_display()
             
             print("✅ Interactive controls setup complete (with simulation controls)")
             
@@ -640,6 +649,43 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         except Exception as e:
             print(f"⚠️ Error toggling wireframe mode: {e}")
     
+    def _setup_time_display(self):
+        """Setup simulation elapsed time display"""
+        try:
+            # Add time display in upper right corner
+            self._time_text_actor = self.plotter.add_text(
+                "Sim Time: 0.0s",
+                position=(0.75, 0.95),  # Upper right corner in normalized coordinates
+                font_size=12,
+                color='white',
+                viewport=True  # Use viewport coordinates
+            )
+            self._simulation_start_time = time.time()
+            print("⏰ Time display setup complete")
+        except Exception as e:
+            print(f"⚠️ Failed to setup time display: {e}")
+    
+    def update_time_display(self):
+        """Update the simulation elapsed time display"""
+        if self._time_text_actor and self._simulation_start_time:
+            try:
+                current_time = time.time()
+                elapsed_time = current_time - self._simulation_start_time
+                
+                # Get simulation time from connected manager if available
+                sim_time_str = ""
+                if self._connected_simulation_manager and hasattr(self._connected_simulation_manager, 'env'):
+                    sim_time = self._connected_simulation_manager.env.now
+                    sim_time_str = f"Sim: {sim_time:.1f}s | "
+                
+                time_text = f"{sim_time_str}Real: {elapsed_time:.1f}s"
+                
+                # Update the text actor
+                self._time_text_actor.SetInput(time_text)
+                
+            except Exception as e:
+                print(f"⚠️ Error updating time display: {e}")
+    
     def _toggle_simulation_pause(self, value):
         """Toggle simulation pause/resume"""
         # Inverted logic: value=True means playing, value=False means paused
@@ -665,6 +711,19 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                 self._connected_simulation_manager.reset_simulation()
         except Exception as e:
             print(f"⚠️ Error resetting simulation: {e}")
+        
+        # Reset the time display when simulation resets
+        self._reset_time_display()
+    
+    def _reset_time_display(self):
+        """Reset the simulation time display"""
+        try:
+            self._simulation_start_time = time.time()
+            if self._time_text_actor:
+                self._time_text_actor.SetInput("Sim: 0.0s | Real: 0.0s")
+            print("⏰ Time display reset")
+        except Exception as e:
+            print(f"⚠️ Error resetting time display: {e}")
     
     def connect_simulation_manager(self, simulation_manager):
         """Connect to a SimulationManager for real-time control synchronization"""
@@ -815,7 +874,7 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                 actor = self.plotter.add_mesh(
                     mesh, 
                     color=color, 
-                    opacity=0.8, 
+                    opacity=1.0, 
                     name=f"{robot_name}_{link_name}"
                 )
                 link_actors[link_name] = {
@@ -873,6 +932,9 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                             mapper = actor.GetMapper()
                             mapper.SetInputData(original_mesh)
                             mapper.Modified()
+            
+            # Update time display
+            self.update_time_display()
             
             return True
             

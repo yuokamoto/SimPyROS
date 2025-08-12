@@ -434,12 +434,13 @@ class SimulationManager:
         except Exception as e:
             print(f"⚠️ Failed to create mesh for {object_name}: {e}")
     
-    def run(self, duration: Optional[float] = None) -> bool:
+    def run(self, duration: Optional[float] = None, auto_close: bool = False) -> bool:
         """
         Run simulation until Ctrl+C, window close, or duration expires
         
         Args:
             duration: Optional simulation duration in seconds
+            auto_close: If True, automatically close visualization when duration expires
             
         Returns:
             Success status
@@ -484,20 +485,33 @@ class SimulationManager:
                     # Run simulation with real-time visualization updates
                     simulation_end_time = None
                     if duration:
-                        # Set end time but continue visualization until window closed
+                        # Set end time
                         simulation_end_time = self.env.now + duration
-                        print(f"🕐 Simulation will run for {duration}s, but window stays open")
+                        if auto_close:
+                            print(f"🕐 Simulation will run for {duration}s, then auto-close")
+                        else:
+                            print(f"🕐 Simulation will run for {duration}s, but window stays open")
                     
                     while not self._shutdown_requested:
                         # Check if simulation time has ended
                         if simulation_end_time and self.env.now >= simulation_end_time:
-                            # Simulation finished, but keep visualization running
+                            # Simulation finished
                             if not hasattr(self, '_simulation_ended'):
                                 print(f"\n⏰ Simulation time ({duration}s) completed")
-                                print("💡 Visualization continues - close window or press Ctrl+C to exit")
                                 self._simulation_ended = True
-                                # Stop the simulation processes but keep visualization
+                                # Stop the simulation processes
                                 self._running = False  # This will stop simulation callbacks
+                                
+                                if auto_close:
+                                    # Auto-close mode: gracefully end visualization
+                                    print("🔄 Auto-closing for next example...")
+                                    self._shutdown_requested = True
+                                    # Give a moment for the message to display
+                                    time.sleep(0.1)
+                                    break
+                                else:
+                                    # Manual mode: keep visualization running
+                                    print("💡 Visualization continues - close window or press Ctrl+C to exit")
                         else:
                             # Run simulation step
                             self.env.run(until=min(self.env.now + 0.01, simulation_end_time or self.env.now + 0.01))
@@ -580,21 +594,62 @@ class SimulationManager:
         self._simulation_paused = False
         print("▶️ Simulation resumed by user")
     
+    def clear_all_robots(self):
+        """Remove all robots from simulation"""
+        try:
+            # Clear control callbacks
+            self.control_callbacks.clear()
+            
+            # Clear from visualizer
+            if self.visualizer and hasattr(self.visualizer, 'robots'):
+                for robot_name in list(self.robots.keys()):
+                    if robot_name in self.visualizer.robots:
+                        del self.visualizer.robots[robot_name]
+                    if robot_name in self.visualizer.link_actors:
+                        # Remove actors from plotter safely
+                        link_actors = self.visualizer.link_actors[robot_name]
+                        for link_name, actor_info in link_actors.items():
+                            try:
+                                if self.visualizer.plotter:
+                                    self.visualizer.plotter.remove_actor(f"{robot_name}_{link_name}")
+                            except Exception as e:
+                                # Silently continue if actor removal fails
+                                pass
+                        del self.visualizer.link_actors[robot_name]
+                    if robot_name in self.visualizer.urdf_loaders:
+                        del self.visualizer.urdf_loaders[robot_name]
+                    if robot_name in self.visualizer.animation_controllers:
+                        del self.visualizer.animation_controllers[robot_name]
+            
+            # Clear robots and objects
+            self.robots.clear()
+            self.objects.clear()
+            
+            print("🗑️ All robots and objects cleared from simulation")
+            
+        except Exception as e:
+            print(f"⚠️ Error clearing robots: {e}")
+    
     def reset_simulation(self):
         """Reset simulation to initial state"""
         self._reset_requested = True
         print("🔄 Simulation reset requested")
-        # Reset all robot joint positions to zero
-        for robot_name, robot in self.robots.items():
+        
+        # Clear all robots and objects for fresh start
+        self.clear_all_robots()
+        
+        # Reset simulation state flags
+        self._running = False
+        self._shutdown_requested = False
+        if hasattr(self, '_simulation_ended'):
+            delattr(self, '_simulation_ended')
+        
+        # Reinitialize visualizer if needed
+        if self.config.visualization and (not self.visualizer or not self.visualizer.plotter):
             try:
-                robot.stop_all_joints()
-                # Reset joint positions to zero
-                for joint_name in robot.get_joint_names():
-                    if robot.joints[joint_name].joint_type.value != 'fixed':
-                        robot.set_joint_position(joint_name, 0.0)
-                print(f"🔄 Reset robot '{robot_name}' joints to zero position")
+                self._initialize_visualization()
             except Exception as e:
-                print(f"⚠️ Error resetting robot '{robot_name}': {e}")
+                print(f"⚠️ Visualization reinitialization warning: {e}")
         
         # Reset simulation time
         self._frame_count = 0
@@ -614,13 +669,27 @@ class SimulationManager:
         self._shutdown_requested = True
         self._running = False
         
-        # Clean up visualization first (this can hang)
+        # Clean up visualization safely
         if self.visualizer:
             try:
                 if hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
-                    self.visualizer.plotter.close()
+                    # Try gentle close first
+                    try:
+                        self.visualizer.plotter.close()
+                    except:
+                        # If gentle close fails, try more forceful cleanup
+                        try:
+                            if hasattr(self.visualizer.plotter, '_exit'):
+                                self.visualizer.plotter._exit()
+                        except:
+                            pass
+                    # Clear the plotter reference
+                    self.visualizer.plotter = None
             except Exception as e:
                 print(f"⚠️ Visualization cleanup warning: {e}")
+            finally:
+                # Always clear the visualizer reference
+                self.visualizer = None
         
         # SimPy processes are automatically cleaned up when environment shuts down
         if self._simulation_process:
