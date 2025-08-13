@@ -194,6 +194,7 @@ class ObjectParameters:
     sdf_path: Optional[str] = None
     initial_pose: Pose = Pose()
     update_interval: float = 0.1  # seconds
+    frequency_grouping_managed: bool = False  # If True, disable individual motion process
 
 
 class SimulationObject:
@@ -223,25 +224,53 @@ class SimulationObject:
     def _start_motion_process(self):
         """Start independent SimPy process for object motion"""
         if not self._process_active and self.parameters.object_type == ObjectType.DYNAMIC:
+            # Check if motion is managed by FrequencyGrouping
+            if self.parameters.frequency_grouping_managed:
+                print(f"🔄 SimulationObject '{self.parameters.name}': Motion process management delegated to FrequencyGrouping")
+                return
+                
             self._process_active = True
             self._motion_process = self.env.process(self._motion_process_loop())
             print(f"🔄 SimulationObject '{self.parameters.name}': Motion process started")
     
     def _motion_process_loop(self) -> Generator:
-        """Independent SimPy process for object motion updates"""
+        """Independent SimPy process for object motion updates - Event-driven optimization"""
         dt = self.parameters.update_interval
+        idle_timeout = 0.1  # 10Hz when idle
         
         while self._process_active:
             try:
-                # Only update if this is a dynamic object
-                if self.parameters.object_type == ObjectType.DYNAMIC:
+                # Only update if this is a dynamic object AND has motion
+                if (self.parameters.object_type == ObjectType.DYNAMIC and 
+                    self._has_motion()):
+                    
                     self._update_state(dt)
+                    # Use normal update interval when active
+                    timeout = dt
+                else:
+                    # Use longer timeout when idle (no motion)
+                    timeout = idle_timeout
                     
             except Exception as e:
                 print(f"⚠️ SimulationObject '{self.parameters.name}' motion error: {e}")
+                timeout = dt  # Fallback to normal interval on error
             
-            # Yield control with update interval
-            yield self.env.timeout(dt)
+            # Yield control with adaptive timeout
+            yield self.env.timeout(timeout)
+    
+    def _has_motion(self) -> bool:
+        """Check if object has non-zero velocity or is connected to moving objects"""
+        # Check own velocity
+        if np.any(self.velocity.data != 0.0):
+            return True
+        
+        # Check if any connected dynamic objects have motion
+        for connected_obj in self.connected_objects:
+            if (connected_obj.parameters.object_type == ObjectType.DYNAMIC and
+                np.any(connected_obj.velocity.data != 0.0)):
+                return True
+        
+        return False
     
     def stop_motion_process(self):
         """Stop the motion process"""
@@ -291,8 +320,16 @@ class SimulationObject:
     def set_velocity(self, velocity: Velocity):
         if self.parameters.object_type == ObjectType.STATIC:
             raise ValueError("Cannot set velocity on static object")
+        
+        # Check if velocity changed (trigger motion if needed)
+        velocity_changed = not np.allclose(self.velocity.data, velocity.data)
         self.velocity = velocity
         self._running = True
+        
+        # If velocity changed from zero to non-zero, ensure motion process is active
+        if velocity_changed and np.any(velocity.data != 0.0):
+            # Motion process will handle the change automatically through _has_motion()
+            pass
     
     def stop(self):
         self.velocity = Velocity.zero()

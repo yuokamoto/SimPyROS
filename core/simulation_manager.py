@@ -43,6 +43,7 @@ class SimulationConfig:
     auto_setup_scene: bool = True
     real_time_factor: float = 1.0  # Real time multiplier (1.0 = real time, 0.5 = half speed, 2.0 = double speed, 0.0 = max speed)
     time_step: float = 0.01  # Simulation time step in seconds
+    enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
     
     
 class ControlCallback:
@@ -105,6 +106,11 @@ class SimulationManager:
         self.objects: Dict[str, SimulationObject] = {}
         self.control_callbacks: Dict[str, ControlCallback] = {}
         
+        # Frequency grouping for automatic optimization
+        self.frequency_groups: Dict[float, Dict] = {}  # frequency -> {robots: [], callbacks: [], process: None}
+        self.robot_frequencies: Dict[str, float] = {}  # robot_name -> frequency
+        self._frequency_grouping_enabled = self.config.enable_frequency_grouping
+        
         # Runtime state
         self._running = False
         self._shutdown_requested = False
@@ -144,7 +150,7 @@ class SimulationManager:
         if self.time_manager is None:
             self.time_manager = TimeManager(
                 real_time_factor=self.config.real_time_factor,
-                strict=True
+                strict=False
             )
             # Set as global time manager for easy access
             set_global_time_manager(self.time_manager)
@@ -176,7 +182,8 @@ class SimulationManager:
                            name: str, 
                            urdf_path: str,
                            initial_pose: Optional[Pose] = None,
-                           joint_update_rate: float = 100.0) -> Robot:
+                           joint_update_rate: float = 10.0,
+                           unified_process: bool = True) -> Robot:
         """
         Add robot from URDF file
         
@@ -199,6 +206,11 @@ class SimulationManager:
         self._initialize_time_management()
         
         try:
+            # If frequency grouping is enabled, disable robot's individual processes
+            effective_unified_process = unified_process
+            if self._frequency_grouping_enabled:
+                effective_unified_process = False  # Disable individual robot processes
+                
             # Create robot with time manager reference
             robot = create_robot_from_urdf(
                 self.env,
@@ -206,15 +218,24 @@ class SimulationManager:
                 name,
                 initial_pose,
                 joint_update_rate,
-                time_manager=self.time_manager
+                time_manager=self.time_manager,
+                unified_process=effective_unified_process,
+                frequency_grouping_managed=self._frequency_grouping_enabled
             )
             
             self.robots[name] = robot
+            
+            # Auto-register for frequency grouping if enabled
+            if self._frequency_grouping_enabled:
+                self._add_robot_to_frequency_group(name, robot, joint_update_rate)
             
             # Add to visualization if available
             if self.config.visualization:
                 self._initialize_visualization()
                 if self.visualizer and self.visualizer.available:
+                    # Connect visualizer to simulation manager BEFORE loading robots
+                    if hasattr(self.visualizer, 'connect_simulation_manager'):
+                        self.visualizer.connect_simulation_manager(self)
                     self.visualizer.load_robot(name, robot)  # Updated method signature
             
             print(f"✅ Robot '{name}' added from {urdf_path}")
@@ -256,6 +277,11 @@ class SimulationManager:
             raise ValueError(f"Object '{name}' already exists")
         
         self.objects[name] = obj
+        
+        # Auto-add to frequency grouping if enabled
+        if self._frequency_grouping_enabled:
+            self._add_simulation_object_to_frequency_group(name, obj)
+        
         print(f"✅ Object '{name}' added")
         return True
     
@@ -277,7 +303,13 @@ class SimulationManager:
         if name not in self.robots:
             raise ValueError(f"Robot '{name}' not found")
         
-        self.control_callbacks[name] = ControlCallback(callback, frequency)
+        if self._frequency_grouping_enabled:
+            # Add callback to frequency group
+            self._add_callback_to_frequency_group(name, callback, frequency)
+        else:
+            # Traditional individual callback
+            self.control_callbacks[name] = ControlCallback(callback, frequency)
+        
         print(f"✅ Control callback set for robot '{name}' at {frequency} Hz")
         return True
     
@@ -322,7 +354,7 @@ class SimulationManager:
     
     def _control_callback_process_loop(self):
         """Independent process for user control callbacks"""
-        callback_dt = 0.01  # 100 Hz for responsive control
+        callback_dt = 1.0 / 10.0  # 10 Hz for control callbacks, sufficient responsiveness
         
         while self._running and not self._shutdown_requested:
             # Check if simulation is paused
@@ -374,6 +406,8 @@ class SimulationManager:
     
     def _duration_monitor(self, duration: float):
         """Monitor simulation duration and close visualization when time expires"""
+        # For RealtimeEnvironment, we want to wait for simulation time duration
+        # The RealtimeEnvironment will automatically adjust wall time based on real_time_factor
         yield self.env.timeout(duration)
         print(f"\n⏰ Duration {duration}s completed - closing visualization")
         self._shutdown_requested = True
@@ -488,8 +522,12 @@ class SimulationManager:
         self._real_time_start = time.time()
         self._sim_time = 0.0
         
-        # Start control callback process if we have callbacks
-        if self.control_callbacks:
+        # Start control processes
+        if self._frequency_grouping_enabled and self.frequency_groups:
+            # Start frequency-grouped processes
+            self._start_frequency_grouped_processes()
+        elif self.control_callbacks:
+            # Start traditional control callback process
             self._control_callback_process = self.env.process(self._control_callback_process_loop())
         
         # Start time manager simulation
@@ -544,8 +582,14 @@ class SimulationManager:
                                     # Manual mode: keep visualization running
                                     print("💡 Visualization continues - close window or press Ctrl+C to exit")
                         else:
-                            # Run simulation step
-                            self.env.run(until=min(self.env.now + 0.01, simulation_end_time or self.env.now + 0.01))
+                            # Run simulation step - let RealtimeEnvironment handle proper timing
+                            try:
+                                # Small increment for responsive UI but let RealtimeEnvironment control timing
+                                target_time = min(self.env.now + 0.1, simulation_end_time or self.env.now + 0.1)
+                                self.env.run(until=target_time)
+                            except simpy.core.EmptySchedule:
+                                # All processes finished
+                                break
                         
                         # Always update visualization
                         try:
@@ -558,17 +602,16 @@ class SimulationManager:
                     print("\n🛑 Visualization interrupted")
                     self._shutdown_requested = True
             else:
-                # Headless mode: let simulation processes run with proper timing
+                # Headless mode: let RealtimeEnvironment handle timing properly
                 if duration:
                     # Start duration monitor process for headless mode
                     duration_process = self.env.process(self._duration_monitor(duration))
-                    print(f"🕐 Headless simulation will run for {duration}s")
+                    print(f"🕐 Headless simulation will run for {duration}s (real-time factor: {self.config.real_time_factor}x)")
                     
-                    # Run SimPy environment until duration expires or shutdown requested
+                    # Run SimPy environment until duration expires - let RealtimeEnvironment handle timing
                     try:
-                        while not self._shutdown_requested:
-                            # Run in small increments to check for shutdown
-                            self.env.run(until=self.env.now + 0.1)
+                        # Run until duration monitor finishes
+                        self.env.run(until=self.env.now + duration + 0.1)  # Allow slight buffer
                     except simpy.core.EmptySchedule:
                         # All processes finished naturally
                         print(f"\n⏰ Headless simulation completed naturally")
@@ -811,7 +854,7 @@ class SimulationManager:
         elapsed = time.time() - self._start_time if self._start_time > 0 else 0
         avg_fps = self._frame_count / elapsed if elapsed > 0 else 0
         
-        return {
+        info = {
             'running': self._running,
             'robots': list(self.robots.keys()),
             'objects': list(self.objects.keys()),
@@ -820,6 +863,326 @@ class SimulationManager:
             'average_fps': avg_fps,
             'config': self.config
         }
+        
+        # Add frequency grouping stats if enabled
+        if self._frequency_grouping_enabled and self.frequency_groups:
+            info['frequency_grouping'] = {
+                'enabled': True,
+                'groups': len(self.frequency_groups),
+                'frequencies': list(self.frequency_groups.keys()),
+                'total_robots': sum(len(group['robots']) for group in self.frequency_groups.values()),
+                'process_reduction_percent': self._calculate_process_reduction_percent()
+            }
+        else:
+            info['frequency_grouping'] = {'enabled': False}
+        
+        return info
+    
+    # ===============================
+    # Frequency Grouping Methods
+    # ===============================
+    
+    def _add_robot_to_frequency_group(self, name: str, robot: Robot, frequency: float):
+        """Add robot to appropriate frequency group"""
+        
+        if frequency not in self.frequency_groups:
+            self.frequency_groups[frequency] = {
+                'robots': [],
+                'objects': [],
+                'callbacks': [],
+                'robot_updates': [],
+                'object_updates': [],
+                'process': None,
+                'callback_count': 0,
+                'update_count': 0
+            }
+        
+        # Add robot info to group
+        robot_info = {
+            'name': name,
+            'instance': robot,
+            'frequency': frequency,
+            'type': 'robot'
+        }
+        
+        # Add robot update function to frequency group
+        robot_update_info = {
+            'name': name,
+            'type': 'robot_update',
+            'instance': robot,
+            'update_function': self._create_robot_update_wrapper(robot),
+            'call_count': 0
+        }
+        
+        self.frequency_groups[frequency]['robots'].append(robot_info)
+        self.frequency_groups[frequency]['robot_updates'].append(robot_update_info)
+        self.robot_frequencies[name] = frequency
+        
+        print(f"🔄 Added robot '{name}' to {frequency} Hz frequency group "
+              f"({len(self.frequency_groups[frequency]['robots'])} robots in group)")
+        print(f"   ↳ Robot internal updates will be grouped at {frequency} Hz")
+    
+    def _add_callback_to_frequency_group(self, name: str, callback: Callable, frequency: float):
+        """Add control callback to appropriate frequency group"""
+        
+        # Use robot's registered frequency if different from callback frequency
+        robot_frequency = self.robot_frequencies.get(name, frequency)
+        
+        if robot_frequency != frequency:
+            print(f"⚠️ Robot '{name}' callback frequency ({frequency} Hz) differs from "
+                  f"robot joint_update_rate ({robot_frequency} Hz). Using robot frequency.")
+            frequency = robot_frequency
+        
+        if frequency not in self.frequency_groups:
+            # This shouldn't happen if robot was added first, but handle gracefully
+            self.frequency_groups[frequency] = {
+                'robots': [],
+                'callbacks': [],
+                'process': None,
+                'callback_count': 0
+            }
+        
+        # Add callback info to group
+        callback_info = {
+            'robot_name': name,
+            'callback': callback,
+            'call_count': 0
+        }
+        
+        self.frequency_groups[frequency]['callbacks'].append(callback_info)
+        print(f"🎮 Added callback for '{name}' to {frequency} Hz frequency group")
+    
+    def _add_simulation_object_to_frequency_group(self, name: str, obj: SimulationObject):
+        """Add simulation object to appropriate frequency group based on its update rate"""
+        
+        # Get object's update frequency
+        update_interval = getattr(obj, 'update_interval', 1.0)  # Default 1s interval
+        frequency = 1.0 / update_interval  # Convert interval to frequency
+        
+        if frequency not in self.frequency_groups:
+            self.frequency_groups[frequency] = {
+                'robots': [],
+                'objects': [],
+                'callbacks': [],
+                'robot_updates': [],
+                'object_updates': [],
+                'process': None,
+                'callback_count': 0,
+                'update_count': 0
+            }
+        
+        # Add object info to group
+        object_info = {
+            'name': name,
+            'instance': obj,
+            'frequency': frequency,
+            'type': 'simulation_object'
+        }
+        
+        # Add object update function to frequency group
+        object_update_info = {
+            'name': name,
+            'type': 'object_update',
+            'instance': obj,
+            'update_function': self._create_object_update_wrapper(obj),
+            'call_count': 0
+        }
+        
+        self.frequency_groups[frequency]['objects'].append(object_info)
+        self.frequency_groups[frequency]['object_updates'].append(object_update_info)
+        
+        print(f"🌍 Added object '{name}' to {frequency} Hz frequency group "
+              f"({len(self.frequency_groups[frequency]['objects'])} objects in group)")
+        print(f"   ↳ Object internal updates will be grouped at {frequency} Hz")
+    
+    def _create_robot_update_wrapper(self, robot: Robot):
+        """Create wrapper for robot internal updates"""
+        def robot_update_wrapper(dt: float):
+            try:
+                # Call robot's internal update methods
+                current_sim_time = self.get_sim_time()
+                
+                # Check if robot has update_joints_if_needed method (centralized architecture)
+                if hasattr(robot, 'update_joints_if_needed'):
+                    robot.update_joints_if_needed(current_sim_time)
+                
+                # Check if robot has update_if_needed method (base motion)
+                if hasattr(robot, 'update_if_needed'):
+                    robot.update_if_needed(current_sim_time)
+                
+                # Check if robot has _update_forward_kinematics method
+                if hasattr(robot, '_update_forward_kinematics'):
+                    robot._update_forward_kinematics()
+                    
+            except Exception as e:
+                print(f"❌ Robot update error for {robot.name}: {e}")
+        
+        return robot_update_wrapper
+    
+    def _create_object_update_wrapper(self, obj: SimulationObject):
+        """Create wrapper for simulation object internal updates"""
+        def object_update_wrapper(dt: float):
+            try:
+                current_sim_time = self.get_sim_time()
+                
+                # Check if object has update_if_needed method
+                if hasattr(obj, 'update_if_needed'):
+                    obj.update_if_needed(current_sim_time)
+                
+                # Check if object has update method
+                elif hasattr(obj, 'update'):
+                    obj.update(dt)
+                    
+            except Exception as e:
+                print(f"❌ Object update error for {obj.name if hasattr(obj, 'name') else 'unnamed'}: {e}")
+        
+        return object_update_wrapper
+    
+    def _start_frequency_grouped_processes(self):
+        """Start all frequency-grouped processes"""
+        
+        print(f"🚀 Starting frequency-grouped processes...")
+        
+        active_frequencies = sorted(self.frequency_groups.keys())
+        total_robots = sum(len(group['robots']) for group in self.frequency_groups.values())
+        
+        print(f"Process optimization:")
+        print(f"   Traditional approach: {total_robots} processes (1 per robot)")
+        print(f"   Frequency-grouped: {len(active_frequencies)} processes (1 per frequency)")
+        reduction_percent = self._calculate_process_reduction_percent()
+        print(f"   Process reduction: {reduction_percent:.1f}%")
+        
+        print(f"Frequency distribution:")
+        for frequency in active_frequencies:
+            group = self.frequency_groups[frequency]
+            robot_count = len(group['robots'])
+            object_count = len(group['objects'])
+            callback_count = len(group['callbacks'])
+            robot_update_count = len(group['robot_updates'])
+            object_update_count = len(group['object_updates'])
+            
+            total_items = robot_count + object_count + callback_count
+            internal_updates = robot_update_count + object_update_count
+            
+            print(f"   {frequency:6.1f} Hz: {robot_count:3d} robots, {object_count:2d} objects, "
+                  f"{callback_count:3d} callbacks, {internal_updates:3d} internal updates")
+            
+            # Start process for this frequency
+            process = self.env.process(self._frequency_group_process_loop(frequency))
+            group['process'] = process
+        
+        print(f"✅ Started {len(active_frequencies)} frequency-grouped processes")
+    
+    def _frequency_group_process_loop(self, frequency: float):
+        """Process loop for a specific frequency group - handles all updates at this frequency"""
+        
+        group = self.frequency_groups[frequency]
+        dt = 1.0 / frequency
+        
+        print(f"🔄 Starting {frequency} Hz unified frequency group process")
+        print(f"   Processing: {len(group['callbacks'])} callbacks, "
+              f"{len(group['robot_updates'])} robot updates, "
+              f"{len(group['object_updates'])} object updates")
+        
+        while self._running and not self._shutdown_requested:
+            try:
+                if not self._simulation_paused:
+                    # 1. Execute all robot internal updates in this frequency group
+                    for robot_update_info in group['robot_updates']:
+                        try:
+                            robot_update_info['update_function'](dt)
+                            robot_update_info['call_count'] += 1
+                            group['update_count'] += 1
+                        except Exception as e:
+                            print(f"❌ Robot update error for {robot_update_info['name']}: {e}")
+                    
+                    # 2. Execute all object internal updates in this frequency group  
+                    for object_update_info in group['object_updates']:
+                        try:
+                            object_update_info['update_function'](dt)
+                            object_update_info['call_count'] += 1
+                            group['update_count'] += 1
+                        except Exception as e:
+                            print(f"❌ Object update error for {object_update_info['name']}: {e}")
+                    
+                    # 3. Execute all user control callbacks in this frequency group
+                    for callback_info in group['callbacks']:
+                        try:
+                            callback_info['callback'](dt)
+                            callback_info['call_count'] += 1
+                            group['callback_count'] += 1
+                        except Exception as e:
+                            print(f"❌ Callback error for {callback_info['robot_name']}: {e}")
+                
+                # Single yield for entire frequency group - this is the revolutionary optimization!
+                # All robot updates, object updates, and callbacks processed in ONE yield
+                yield self.env.timeout(dt)
+                
+            except Exception as e:
+                print(f"❌ Frequency group {frequency} Hz process error: {e}")
+                break
+    
+    def _calculate_process_reduction_percent(self) -> float:
+        """Calculate process reduction percentage from frequency grouping"""
+        
+        if not self.frequency_groups:
+            return 0.0
+        
+        # Count total entities that would traditionally need separate processes
+        total_robots = sum(len(group['robots']) for group in self.frequency_groups.values())
+        total_objects = sum(len(group['objects']) for group in self.frequency_groups.values())
+        
+        # In traditional architecture:
+        # - Each robot would need unified_process (1 process) OR separate processes for joint/sensor/base/nav (4 processes)
+        # - Each object would need 1 process
+        # For simplicity, assume 1 process per robot + 1 per object in traditional approach
+        traditional_processes = total_robots + total_objects
+        
+        # Frequency-grouped approach uses only 1 process per unique frequency
+        frequency_grouped_processes = len(self.frequency_groups)
+        
+        if traditional_processes == 0:
+            return 0.0
+        
+        return (1 - frequency_grouped_processes / traditional_processes) * 100
+    
+    def get_frequency_grouping_stats(self) -> Dict[str, Any]:
+        """Get detailed frequency grouping statistics"""
+        
+        if not self._frequency_grouping_enabled:
+            return {'enabled': False}
+        
+        total_callbacks = sum(group['callback_count'] for group in self.frequency_groups.values())
+        total_updates = sum(group['update_count'] for group in self.frequency_groups.values())
+        total_robots = sum(len(group['robots']) for group in self.frequency_groups.values())
+        total_objects = sum(len(group['objects']) for group in self.frequency_groups.values())
+        
+        stats = {
+            'enabled': True,
+            'total_groups': len(self.frequency_groups),
+            'total_robots': total_robots,
+            'total_objects': total_objects,
+            'total_callbacks': total_callbacks,
+            'total_internal_updates': total_updates,
+            'process_reduction_percent': self._calculate_process_reduction_percent(),
+            'groups': {}
+        }
+        
+        for frequency, group in self.frequency_groups.items():
+            stats['groups'][frequency] = {
+                'frequency': frequency,
+                'robot_count': len(group['robots']),
+                'object_count': len(group['objects']),
+                'callback_count': len(group['callbacks']),
+                'robot_update_count': len(group['robot_updates']),
+                'object_update_count': len(group['object_updates']),
+                'total_callback_calls': group['callback_count'],
+                'total_update_calls': group['update_count'],
+                'robots': [robot['name'] for robot in group['robots']],
+                'objects': [obj['name'] for obj in group['objects']]
+            }
+        
+        return stats
 
 
 # Convenience functions for common use cases

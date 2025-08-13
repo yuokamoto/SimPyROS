@@ -9,7 +9,7 @@ RealtimeEnvironment for reliable real-time synchronization.
 import simpy.rt
 import time
 import threading
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 
@@ -49,14 +49,27 @@ class TimeManager:
             real_time_factor: Real-time multiplier (1.0=real time, 0.5=half speed, 2.0=double speed)
             strict: If True, enforce strict real-time synchronization
         """
-        self._real_time_factor = max(0.001, real_time_factor)  # Prevent division by zero
+        self._real_time_factor = real_time_factor
         self._strict = strict
         
-        # Create RealtimeEnvironment
-        self.env = simpy.rt.RealtimeEnvironment(
-            factor=self._real_time_factor,
-            strict=self._strict
-        )
+        # Handle special case: real_time_factor=0.0 means maximum speed (no real-time constraints)
+        if real_time_factor == 0.0:
+            # Use standard Environment for maximum speed (no real-time constraints)
+            self.env = simpy.Environment()
+            self._use_realtime = False
+            simpy_factor = None  # Not applicable for standard Environment
+        else:
+            # Create RealtimeEnvironment for real-time synchronization
+            # NOTE: SimPy RealtimeEnvironment factor is INVERSE of our real_time_factor
+            # Our real_time_factor: 1.0=real time, 2.0=double speed, 0.5=half speed
+            # SimPy factor: 1.0=real time, 0.5=double speed, 2.0=half speed
+            safe_factor = max(0.001, real_time_factor)  # Prevent division by zero for non-zero values
+            simpy_factor = 1.0 / safe_factor  # Convert to SimPy's factor
+            self._use_realtime = True
+            self.env = simpy.rt.RealtimeEnvironment(
+                factor=simpy_factor,
+                strict=self._strict
+            )
         
         # Time tracking
         self._start_real_time = 0.0
@@ -65,10 +78,13 @@ class TimeManager:
         # Thread safety for visualization access
         self._lock = threading.RLock()
         
-        # Frequency controllers for different update rates
-        self._frequency_controllers: Dict[str, 'FrequencyController'] = {}
+        # Note: FrequencyController functionality moved to legacy/
+        # Modern architecture uses independent SimPy processes with direct timing
         
-        print(f"⏰ TimeManager: RealtimeEnvironment initialized (factor={self._real_time_factor}x)")
+        if self._use_realtime:
+            print(f"⏰ TimeManager: RealtimeEnvironment initialized (factor={self._real_time_factor}x)")
+        else:
+            print(f"⏰ TimeManager: Standard Environment initialized (MAX SPEED mode)")
     
     def start_simulation(self):
         """Mark simulation as started and initialize timing"""
@@ -110,8 +126,9 @@ class TimeManager:
             
         with self._lock:
             self._real_time_factor = factor
-            # Update the RealtimeEnvironment factor
-            self.env.factor = factor
+            # Update the RealtimeEnvironment factor (convert to SimPy's inverse factor)
+            simpy_factor = 1.0 / factor
+            self.env.factor = simpy_factor
             
         print(f"⏱️ TimeManager: Real-time factor updated: {old_factor:.2f}x → {factor:.2f}x")
     
@@ -136,29 +153,8 @@ class TimeManager:
                 actual_speed=actual_speed
             )
     
-    def create_frequency_controller(self, name: str, frequency: float) -> 'FrequencyController':
-        """
-        Create a frequency controller for specific update rates
-        
-        Args:
-            name: Unique name for this controller
-            frequency: Target frequency in Hz
-            
-        Returns:
-            FrequencyController instance
-        """
-        controller = FrequencyController(self, name, frequency)
-        self._frequency_controllers[name] = controller
-        return controller
-    
-    def remove_frequency_controller(self, name: str):
-        """Remove a frequency controller"""
-        if name in self._frequency_controllers:
-            del self._frequency_controllers[name]
-    
-    def get_frequency_controller(self, name: str) -> Optional['FrequencyController']:
-        """Get existing frequency controller by name"""
-        return self._frequency_controllers.get(name)
+    # Note: FrequencyController functionality moved to legacy/time_management/
+    # Modern architecture uses independent SimPy processes with direct timing.
     
     def reset(self):
         """Reset time manager state"""
@@ -171,82 +167,13 @@ class TimeManager:
             )
             self._simulation_started = False
             
-            # Clear frequency controllers
-            self._frequency_controllers.clear()
+            # Note: No frequency controllers to clear in modern architecture
             
             print("🔄 TimeManager: Reset to initial state")
 
 
-class FrequencyController:
-    """
-    Simple frequency controller using RealtimeEnvironment timing
-    
-    Provides easy frequency control without complex custom timing logic.
-    """
-    
-    def __init__(self, time_manager: TimeManager, name: str, frequency: float):
-        """
-        Initialize frequency controller
-        
-        Args:
-            time_manager: Reference to central time manager
-            name: Unique name for this controller  
-            frequency: Target frequency in Hz
-        """
-        self.time_manager = time_manager
-        self.name = name
-        self.frequency = frequency
-        self.interval = 1.0 / frequency if frequency > 0 else 0.1
-        self._last_update_sim_time = 0.0
-    
-    def should_update(self) -> bool:
-        """
-        Check if it's time for the next update based on simulation time
-        
-        Returns:
-            True if update should occur, False otherwise
-        """
-        current_sim_time = self.time_manager.get_sim_time()
-        return current_sim_time >= self._last_update_sim_time + self.interval
-    
-    def mark_updated(self):
-        """Mark that an update has occurred"""
-        self._last_update_sim_time = self.time_manager.get_sim_time()
-    
-    def update_if_needed(self, update_func: Callable[[], None]) -> bool:
-        """
-        Execute update function if frequency timer indicates it's time
-        
-        Args:
-            update_func: Function to call for update (should take no arguments)
-            
-        Returns:
-            True if update was performed, False otherwise
-        """
-        if self.should_update():
-            try:
-                update_func()
-                self.mark_updated()
-                return True
-            except Exception as e:
-                print(f"⚠️ FrequencyController '{self.name}' update error: {e}")
-                return False
-        return False
-    
-    def set_frequency(self, frequency: float):
-        """Update the frequency"""
-        if frequency > 0:
-            self.frequency = frequency
-            self.interval = 1.0 / frequency
-            print(f"⏱️ FrequencyController '{self.name}': Updated to {frequency} Hz")
-    
-    def get_frequency(self) -> float:
-        """Get current frequency"""
-        return self.frequency
-    
-    def reset(self):
-        """Reset frequency controller timing"""
-        self._last_update_sim_time = 0.0
+# Note: FrequencyController moved to legacy/time_management/frequency_controller.py
+# Modern architecture uses independent SimPy processes with yield env.timeout()
 
 
 # Global time manager instance for singleton access
@@ -280,34 +207,5 @@ def get_real_time_factor() -> float:
     return 1.0
 
 
-def create_process_with_frequency(time_manager: TimeManager, 
-                                 process_func: Callable,
-                                 frequency: float,
-                                 name: str = "process") -> Any:
-    """
-    Convenience function to create a SimPy process with specific frequency
-    
-    Args:
-        time_manager: TimeManager instance
-        process_func: Process function (should be a generator)
-        frequency: Target frequency in Hz
-        name: Process name for debugging
-        
-    Returns:
-        SimPy process instance
-    """
-    def frequency_controlled_process():
-        interval = 1.0 / frequency
-        while True:
-            try:
-                # Execute one step of the process
-                next(process_func)
-            except StopIteration:
-                break
-            except Exception as e:
-                print(f"⚠️ Process '{name}' error: {e}")
-            
-            # Wait for next interval
-            yield time_manager.env.timeout(interval)
-    
-    return time_manager.env.process(frequency_controlled_process())
+# Note: Legacy helper functions moved to legacy/time_management/
+# Modern approach: Define SimPy processes directly with their own timing

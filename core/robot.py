@@ -199,7 +199,9 @@ class RobotParameters(ObjectParameters):
     """Robot-specific parameters extending ObjectParameters"""
     urdf_path: str
     use_urdf_initial_pose: bool = True
-    joint_update_rate: float = 100.0  # Hz, for high-frequency joint control
+    joint_update_rate: float = 10.0  # Hz, reasonable frequency for joint control
+    unified_process: bool = True  # New: Use single unified process instead of multiple
+    frequency_grouping_managed: bool = False  # If True, disable internal processes (managed by FrequencyGroup)
     
     def __post_init__(self):
         # Ensure this is a dynamic object
@@ -247,12 +249,22 @@ class Robot(SimulationObject):
         self._sensor_process = None
         self._navigation_process = None
         self._base_motion_process = None
+        self._unified_process = None  # New: Single unified process
         
         # Process control flags
         self._processes_active = False
         self._joint_control_frequency = self.robot_parameters.joint_update_rate
-        self._sensor_frequency = 30.0  # Hz
-        self._navigation_frequency = 10.0  # Hz
+        self._sensor_frequency = 10.0  # Hz, sufficient for sensor processing
+        self._navigation_frequency = 5.0   # Hz, navigation planning frequency
+        
+        # Event-driven flags - only process when needed
+        self._has_joint_commands = False
+        self._has_velocity_commands = False
+        self._has_navigation_target = False
+        self._navigation_target: Optional[Pose] = None
+        
+        # Event locks for thread safety
+        self._event_lock = threading.Lock()
         
         # Load URDF
         self._load_urdf()
@@ -318,21 +330,25 @@ class Robot(SimulationObject):
         return self.link_names[0] if self.link_names else "unknown"
     
     def _start_robot_processes(self):
-        """Start independent SimPy processes for different robot subsystems"""
+        """Start robot processes - unified or separate based on configuration"""
         if not self._processes_active:
             self._processes_active = True
             
-            # Start joint control process
-            self._joint_control_process = self.env.process(self._joint_control_process_loop())
+            # Check if robot is managed by FrequencyGrouping
+            if self.robot_parameters.frequency_grouping_managed:
+                print(f"🔄 Robot '{self.robot_name}': Process management delegated to FrequencyGrouping")
+                return
             
-            # Start sensor processing process
-            self._sensor_process = self.env.process(self._sensor_process_loop())
-            
-            # Start base motion process 
-            self._base_motion_process = self.env.process(self._base_motion_process_loop())
-            
-            # Navigation process starts on demand
-            print(f"🤖 Robot '{self.robot_name}': Started independent SimPy processes")
+            if self.robot_parameters.unified_process:
+                # Event-driven unified process (NEW)
+                self._unified_process = self.env.process(self._unified_event_driven_loop())
+                print(f"🤖 Robot '{self.robot_name}': Started unified event-driven process")
+            else:
+                # Legacy: Independent processes
+                self._joint_control_process = self.env.process(self._joint_control_process_loop())
+                self._sensor_process = self.env.process(self._sensor_process_loop())
+                self._base_motion_process = self.env.process(self._base_motion_process_loop())
+                print(f"🤖 Robot '{self.robot_name}': Started independent SimPy processes")
     
     def _joint_control_process_loop(self) -> Generator:
         """Independent SimPy process for high-frequency joint control"""
@@ -377,7 +393,7 @@ class Robot(SimulationObject):
     
     def _base_motion_process_loop(self) -> Generator:
         """Independent SimPy process for robot base motion"""
-        base_dt = 1.0 / 100.0  # 100 Hz for smooth base motion
+        base_dt = 1.0 / 10.0   # 10 Hz for base motion, sufficient for smooth movement
         
         while self._processes_active:
             try:
@@ -391,16 +407,130 @@ class Robot(SimulationObject):
             # Yield control with base motion frequency
             yield self.env.timeout(base_dt)
     
+    def _unified_event_driven_loop(self) -> Generator:
+        """NEW: Unified event-driven process combining all robot subsystems"""
+        last_joint_update = 0.0
+        last_sensor_update = 0.0
+        last_base_update = 0.0
+        last_navigation_update = 0.0
+        
+        joint_dt = 1.0 / self._joint_control_frequency
+        sensor_dt = 1.0 / self._sensor_frequency  
+        base_dt = 1.0 / 10.0  # Base motion frequency
+        nav_dt = 1.0 / self._navigation_frequency
+        
+        # Adaptive timeout for event-driven behavior
+        base_timeout = 0.1  # 10Hz base monitoring
+        
+        while self._processes_active:
+            current_time = self.time_manager.get_sim_time() if self.time_manager else self.env.now
+            active_updates = False
+            
+            try:
+                # 1. Joint Control (event-driven + periodic)
+                if (self._has_joint_commands or 
+                    (current_time - last_joint_update) >= joint_dt):
+                    
+                    with self._joint_command_lock:
+                        # Process joint commands if any
+                        while self.joint_command_queue:
+                            command = self.joint_command_queue.pop(0)
+                            if command.name in self.joints:
+                                self.joints[command.name].set_command(command)
+                                active_updates = True
+                        
+                        # Update joints if commands processed or time elapsed
+                        if active_updates or (current_time - last_joint_update) >= joint_dt:
+                            for joint in self.joints.values():
+                                joint.update(joint_dt)
+                            self._update_forward_kinematics()
+                            last_joint_update = current_time
+                            
+                            # Clear joint command flag if no more commands
+                            self._has_joint_commands = len(self.joint_command_queue) > 0
+                
+                # 2. Base Motion (event-driven)
+                if (self._has_velocity_commands or 
+                    (current_time - last_base_update) >= base_dt):
+                    
+                    # Check if we have non-zero velocity
+                    has_motion = np.any(self.velocity.data != 0.0)
+                    
+                    if has_motion:
+                        if self.parameters.object_type == ObjectType.DYNAMIC:
+                            self._update_base_motion(base_dt)
+                            active_updates = True
+                        last_base_update = current_time
+                    
+                    # Update velocity command flag
+                    self._has_velocity_commands = has_motion
+                
+                # 3. Navigation (event-driven)
+                if (self._has_navigation_target and 
+                    (current_time - last_navigation_update) >= nav_dt):
+                    
+                    if self._navigation_target:
+                        # Simple navigation logic
+                        current_pose = self.get_pose()
+                        distance = np.linalg.norm(self._navigation_target.position - current_pose.position)
+                        
+                        if distance < 0.1:  # Reached target
+                            print(f"🎯 Robot '{self.robot_name}': Reached navigation target")
+                            with self._event_lock:
+                                self._has_navigation_target = False
+                                self._navigation_target = None
+                        else:
+                            # Calculate velocity towards target
+                            direction = (self._navigation_target.position - current_pose.position) / distance
+                            speed = min(1.0, distance)
+                            
+                            nav_velocity = Velocity(linear_x=direction[0] * speed, 
+                                                  linear_y=direction[1] * speed)
+                            self.set_velocity(nav_velocity)
+                            active_updates = True
+                        
+                        last_navigation_update = current_time
+                
+                # 4. Sensor Processing (periodic, low priority)
+                if (current_time - last_sensor_update) >= sensor_dt:
+                    self._process_sensors()
+                    last_sensor_update = current_time
+                
+            except Exception as e:
+                print(f"⚠️ Robot '{self.robot_name}' unified process error: {e}")
+            
+            # Dynamic timeout based on activity
+            if active_updates:
+                # High frequency when active
+                timeout = min(joint_dt, base_dt, nav_dt) / 2  # Half the shortest interval
+            else:
+                # Lower frequency when idle
+                timeout = base_timeout
+            
+            # Yield control
+            yield self.env.timeout(timeout)
+    
     def start_navigation_process(self, target_pose: Optional[Pose] = None) -> bool:
         """Start autonomous navigation process"""
-        if self._navigation_process is None:
+        with self._event_lock:
+            self._has_navigation_target = True
+            self._navigation_target = target_pose
+            
+        if not self.robot_parameters.unified_process and self._navigation_process is None:
             self._navigation_process = self.env.process(self._navigation_process_loop(target_pose))
             print(f"🧭 Robot '{self.robot_name}': Navigation process started")
+            return True
+        elif self.robot_parameters.unified_process:
+            print(f"🧭 Robot '{self.robot_name}': Navigation target set for unified process")
             return True
         return False
     
     def stop_navigation_process(self):
         """Stop autonomous navigation process"""
+        with self._event_lock:
+            self._has_navigation_target = False
+            self._navigation_target = None
+            
         if self._navigation_process:
             try:
                 self._navigation_process.interrupt()
@@ -540,6 +670,9 @@ class Robot(SimulationObject):
     def set_velocity(self, velocity: Velocity):
         """Set robot base velocity (inherited interface)"""
         super().set_velocity(velocity)
+        # Signal event for unified process
+        with self._event_lock:
+            self._has_velocity_commands = True
     
     def teleport(self, pose: Pose):
         """Teleport robot base (inherited interface)"""
@@ -565,6 +698,10 @@ class Robot(SimulationObject):
         # Thread-safe command queue access
         with self._joint_command_lock:
             self.joint_command_queue.append(command)
+        
+        # Signal event for unified process
+        with self._event_lock:
+            self._has_joint_commands = True
     
     def set_joint_velocity(self, joint_name: str, velocity: float, max_effort: Optional[float] = None):
         """Set target velocity for a joint - ROS 2 style interface (thread-safe)"""
@@ -582,6 +719,10 @@ class Robot(SimulationObject):
         # Thread-safe command queue access
         with self._joint_command_lock:
             self.joint_command_queue.append(command)
+        
+        # Signal event for unified process
+        with self._event_lock:
+            self._has_joint_commands = True
     
     def set_joint_effort(self, joint_name: str, effort: float, max_velocity: Optional[float] = None):
         """Set target effort (torque/force) for a joint - ROS 2 style interface (thread-safe)"""
@@ -599,6 +740,10 @@ class Robot(SimulationObject):
         # Thread-safe command queue access
         with self._joint_command_lock:
             self.joint_command_queue.append(command)
+        
+        # Signal event for unified process
+        with self._event_lock:
+            self._has_joint_commands = True
     
     def set_joint_positions(self, joint_positions: Dict[str, float], max_velocity: Optional[float] = None):
         """Set multiple joint positions simultaneously - ROS 2 trajectory style"""
@@ -626,7 +771,14 @@ class Robot(SimulationObject):
         """Shutdown all robot processes"""
         self._processes_active = False
         
-        # Interrupt all processes
+        # Interrupt unified process if using it
+        if self._unified_process:
+            try:
+                self._unified_process.interrupt()
+            except Exception:
+                pass
+        
+        # Interrupt individual processes (legacy mode)
         if self._joint_control_process:
             try:
                 self._joint_control_process.interrupt()
@@ -651,7 +803,8 @@ class Robot(SimulationObject):
             except Exception:
                 pass
         
-        print(f"🔻 Robot '{self.robot_name}': All processes shutdown")
+        mode = "unified" if self.robot_parameters.unified_process else "independent"
+        print(f"🔻 Robot '{self.robot_name}': All {mode} processes shutdown")
     
     # ====================
     # State Query Interface (ROS 2 compatible)
@@ -950,8 +1103,10 @@ def create_robot_from_urdf(env: simpy.Environment,
                           urdf_path: str,
                           robot_name: str = "robot",
                           initial_pose: Optional[Pose] = None,
-                          joint_update_rate: float = 100.0,
-                          time_manager: Optional[TimeManager] = None) -> Robot:
+                          joint_update_rate: float = 10.0,
+                          time_manager: Optional[TimeManager] = None,
+                          unified_process: bool = True,
+                          frequency_grouping_managed: bool = False) -> Robot:
     """
     Factory function to create a robot from URDF with independent SimPy processes
     
@@ -962,6 +1117,8 @@ def create_robot_from_urdf(env: simpy.Environment,
         initial_pose: Initial pose (default: origin)
         joint_update_rate: Joint control frequency in Hz
         time_manager: TimeManager instance for centralized time access
+        unified_process: Use unified process architecture (default True)
+        frequency_grouping_managed: If True, disable individual robot processes (managed by FrequencyGroup)
     
     Returns:
         Robot instance with independent SimPy processes
@@ -975,7 +1132,9 @@ def create_robot_from_urdf(env: simpy.Environment,
         urdf_path=urdf_path,
         initial_pose=initial_pose,
         update_interval=0.01,  # Base motion frequency
-        joint_update_rate=joint_update_rate
+        joint_update_rate=joint_update_rate,
+        unified_process=unified_process,
+        frequency_grouping_managed=frequency_grouping_managed
     )
     
     return Robot(env, parameters, time_manager)
@@ -984,8 +1143,9 @@ def create_robot_from_urdf(env: simpy.Environment,
 def create_robot_programmatically(env: simpy.Environment,
                                  robot_name: str = "programmatic_robot",
                                  initial_pose: Optional[Pose] = None,
-                                 joint_update_rate: float = 100.0,
-                                 time_manager: Optional[TimeManager] = None) -> Robot:
+                                 joint_update_rate: float = 10.0,
+                                 time_manager: Optional[TimeManager] = None,
+                                 unified_process: bool = True) -> Robot:
     """
     Factory function to create an empty robot for programmatic construction with SimPy processes
     
@@ -1009,7 +1169,8 @@ def create_robot_programmatically(env: simpy.Environment,
         urdf_path="",  # Empty for programmatic robots
         initial_pose=initial_pose,
         update_interval=0.01,
-        joint_update_rate=joint_update_rate
+        joint_update_rate=joint_update_rate,
+        unified_process=unified_process
     )
     
     # Create robot instance but skip URDF loading
