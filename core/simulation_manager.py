@@ -21,6 +21,8 @@ from dataclasses import dataclass
 import warnings
 
 import simpy
+import simpy.rt
+import simpy.core
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -28,6 +30,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core.robot import Robot, create_robot_from_urdf, RobotParameters
 from core.simulation_object import SimulationObject, ObjectParameters, Pose, Velocity
 from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visualizer
+from core.time_manager import TimeManager, set_global_time_manager
 
 
 @dataclass
@@ -38,7 +41,8 @@ class SimulationConfig:
     visualization_update_rate: float = 30.0  # Hz
     window_size: tuple = (1200, 800)
     auto_setup_scene: bool = True
-    real_time_factor: float = 1.0  # Real time multiplier (1.0 = real time, 0.5 = half speed, 2.0 = double speed)
+    real_time_factor: float = 1.0  # Real time multiplier (1.0 = real time, 0.5 = half speed, 2.0 = double speed, 0.0 = max speed)
+    time_step: float = 0.01  # Simulation time step in seconds
     
     
 class ControlCallback:
@@ -62,15 +66,19 @@ class ControlCallback:
 
 class SimulationManager:
     """
-    Central simulation manager for simplified robot simulation
+    Orchestrator for independent SimPy process-based robot simulation
     
-    This class provides a high-level interface that reduces the complexity
-    of setting up and running robot simulations. It handles:
-    - SimPy environment management
-    - Robot and object lifecycle
-    - Visualization setup and updates
-    - Control callback management
-    - Graceful shutdown handling
+    This class coordinates multiple independent SimPy processes:
+    - Robot subsystem processes (joint control, sensors, navigation)
+    - Simulation object motion processes
+    - Visualization process
+    - User control callback processes
+    
+    Features:
+    - RealtimeEnvironment for accurate timing
+    - Independent process architecture leveraging SimPy's strengths
+    - Centralized time management
+    - Event-driven robot behaviors
     
     Example usage:
         sim = SimulationManager()
@@ -81,15 +89,15 @@ class SimulationManager:
     
     def __init__(self, config: Optional[SimulationConfig] = None):
         """
-        Initialize simulation manager
+        Initialize simulation manager with RealtimeEnvironment
         
         Args:
             config: Simulation configuration, uses defaults if None
         """
         self.config = config or SimulationConfig()
         
-        # Core components
-        self.env: Optional[simpy.Environment] = None
+        # Core components - use RealtimeEnvironment
+        self.time_manager: Optional[TimeManager] = None
         self.visualizer: Optional[URDFRobotVisualizer] = None
         
         # Simulation state
@@ -102,13 +110,17 @@ class SimulationManager:
         self._shutdown_requested = False
         self._simulation_paused = False
         self._reset_requested = False
-        # SimPy processes for pure simulation environment
-        self._simulation_process = None
+        
+        # SimPy processes - simplified architecture
         self._visualization_process = None
+        self._control_callback_process = None
         
         # Performance tracking
         self._start_time = 0.0
         self._frame_count = 0
+        
+        # Initialize time management system
+        self._initialize_time_management()
         
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
@@ -127,11 +139,21 @@ class SimulationManager:
         if hasattr(signal, 'SIGTERM'):
             signal.signal(signal.SIGTERM, signal_handler)
     
-    def _initialize_environment(self):
-        """Initialize SimPy environment"""
-        if self.env is None:
-            self.env = simpy.Environment()
-            print("✅ SimPy environment initialized")
+    def _initialize_time_management(self):
+        """Initialize RealtimeEnvironment-based time management"""
+        if self.time_manager is None:
+            self.time_manager = TimeManager(
+                real_time_factor=self.config.real_time_factor,
+                strict=True
+            )
+            # Set as global time manager for easy access
+            set_global_time_manager(self.time_manager)
+            print(f"✅ TimeManager initialized with RealtimeEnvironment (factor={self.config.real_time_factor}x)")
+    
+    @property
+    def env(self) -> simpy.rt.RealtimeEnvironment:
+        """Get the SimPy RealtimeEnvironment"""
+        return self.time_manager.env if self.time_manager else None
     
     def _initialize_visualization(self):
         """Initialize visualization system if enabled"""
@@ -173,17 +195,18 @@ class SimulationManager:
         if name in self.robots:
             raise ValueError(f"Robot '{name}' already exists")
         
-        # Initialize environment if needed
-        self._initialize_environment()
+        # Ensure time management is initialized
+        self._initialize_time_management()
         
         try:
-            # Create robot
+            # Create robot with time manager reference
             robot = create_robot_from_urdf(
                 self.env,
                 urdf_path,
                 name,
                 initial_pose,
-                joint_update_rate
+                joint_update_rate,
+                time_manager=self.time_manager
             )
             
             self.robots[name] = robot
@@ -297,32 +320,31 @@ class SimulationManager:
             return True
         return False
     
-    def _simulation_process_loop(self):
-        """Main simulation process loop - SimPy pure environment"""
-        dt = 1.0 / self.config.update_rate
+    def _control_callback_process_loop(self):
+        """Independent process for user control callbacks"""
+        callback_dt = 0.01  # 100 Hz for responsive control
         
         while self._running and not self._shutdown_requested:
-            # Dynamically apply real time factor to simulation time (updated each loop)
-            simpy_dt = dt * self.config.real_time_factor
             # Check if simulation is paused
             if self._simulation_paused:
-                # Skip control updates when paused, but continue visualization
-                yield self.env.timeout(simpy_dt)
+                yield self.env.timeout(callback_dt)
                 continue
-                
+            
+            # Get current simulation time from time manager
+            current_sim_time = self.time_manager.get_sim_time()
+            
             # Process control callbacks
-            current_time = self.env.now
             for robot_name, callback in self.control_callbacks.items():
-                if callback.should_call(current_time):
+                if callback.should_call(current_sim_time):
                     try:
-                        callback.call(dt, current_time)
+                        callback.call(callback_dt, current_sim_time)
                     except Exception as e:
                         print(f"⚠️ Control callback error for {robot_name}: {e}")
             
             self._frame_count += 1
             
-            # Yield control back to SimPy with time-adjusted interval
-            yield self.env.timeout(simpy_dt)
+            # Yield control
+            yield self.env.timeout(callback_dt)
     
     def _visualization_process_loop(self):
         """Visualization update process loop - SimPy pure environment"""
@@ -453,16 +475,25 @@ class SimulationManager:
         print(f"   Robots: {len(self.robots)}")
         print(f"   Objects: {len(self.objects)}")
         print(f"   Update rate: {self.config.update_rate} Hz")
-        print(f"   Real time factor: {self.config.real_time_factor}x")
+        if self.config.real_time_factor == 0.0:
+            print("   Real time factor: MAX SPEED (0.0)")
+        else:
+            print(f"   Real time factor: {self.config.real_time_factor}x")
         print(f"   Visualization: {'On' if self.config.visualization else 'Off'}")
         print("   Press Ctrl+C to stop")
         print("=" * 50)
         
         self._running = True
         self._start_time = time.time()
+        self._real_time_start = time.time()
+        self._sim_time = 0.0
         
-        # Start simulation process in SimPy environment
-        self._simulation_process = self.env.process(self._simulation_process_loop())
+        # Start control callback process if we have callbacks
+        if self.control_callbacks:
+            self._control_callback_process = self.env.process(self._control_callback_process_loop())
+        
+        # Start time manager simulation
+        self.time_manager.start_simulation()
         
         # Start visualization process
         if self.config.visualization and self.visualizer and self.visualizer.available:
@@ -527,11 +558,25 @@ class SimulationManager:
                     print("\n🛑 Visualization interrupted")
                     self._shutdown_requested = True
             else:
-                # Headless mode: run SimPy environment directly
+                # Headless mode: let simulation processes run with proper timing
                 if duration:
-                    self.env.run(until=duration)
+                    # Start duration monitor process for headless mode
+                    duration_process = self.env.process(self._duration_monitor(duration))
+                    print(f"🕐 Headless simulation will run for {duration}s")
+                    
+                    # Run SimPy environment until duration expires or shutdown requested
+                    try:
+                        while not self._shutdown_requested:
+                            # Run in small increments to check for shutdown
+                            self.env.run(until=self.env.now + 0.1)
+                    except simpy.core.EmptySchedule:
+                        # All processes finished naturally
+                        print(f"\n⏰ Headless simulation completed naturally")
+                        
+                    print(f"\n⏰ Headless simulation duration ({duration}s) completed")
                 else:
                     try:
+                        # Infinite headless simulation
                         self.env.run()
                     except KeyboardInterrupt:
                         print("\n⏹️ Simulation stopped by user")
@@ -549,18 +594,18 @@ class SimulationManager:
         Update real-time factor during simulation
         
         Args:
-            factor: New real-time factor (0.1 to 5.0)
+            factor: New real-time factor (0.1 to 10.0)
         """
         old_factor = self.config.real_time_factor
-        if factor < 0.1:
-            factor = 0.1
-        elif factor > 5.0:
-            factor = 5.0
-            
         self.config.real_time_factor = factor
+        
+        # Update time manager
+        if self.time_manager:
+            self.time_manager.set_real_time_factor(factor)
+        
         print(f"⏱️ SimulationManager real-time factor: {old_factor:.2f}x → {factor:.2f}x")
         
-        # Also sync back to visualizer if it has different value
+        # Sync to visualizer if available
         if hasattr(self, 'visualizer') and self.visualizer and hasattr(self.visualizer, 'realtime_factor'):
             if abs(self.visualizer.realtime_factor - factor) > 0.01:
                 self.visualizer.realtime_factor = factor
@@ -568,7 +613,41 @@ class SimulationManager:
     
     def get_realtime_factor(self) -> float:
         """Get current real-time factor"""
+        if self.time_manager:
+            return self.time_manager.get_real_time_factor()
         return self.config.real_time_factor
+    
+    # Centralized time management methods (memo.txt item 10)
+    def get_sim_time(self) -> float:
+        """Get current simulation time from time manager"""
+        return self.time_manager.get_sim_time() if self.time_manager else 0.0
+    
+    def get_real_time(self) -> float:
+        """Get real time elapsed since simulation start"""
+        return self.time_manager.get_real_time_elapsed() if self.time_manager else 0.0
+    
+    def get_time_step(self) -> float:
+        """Get current simulation time step"""
+        return self.config.time_step
+    
+    def set_time_step(self, time_step: float):
+        """Set simulation time step"""
+        if time_step > 0:
+            self.config.time_step = time_step
+            print(f"⏱️ Time step updated: {time_step:.4f}s")
+    
+    def get_timing_stats(self) -> dict:
+        """Get real-time synchronization statistics from time manager"""
+        if self.time_manager:
+            stats = self.time_manager.get_timing_stats()
+            return {
+                'sim_time': stats.sim_time,
+                'real_time_elapsed': stats.real_time_elapsed,
+                'target_speed': stats.target_speed,
+                'actual_speed': stats.actual_speed,
+                'real_time_factor': stats.real_time_factor
+            }
+        return {'accuracy': 'N/A'}
     
     def pause_simulation(self):
         """Pause the simulation"""
@@ -654,6 +733,17 @@ class SimulationManager:
         # Reset simulation time
         self._frame_count = 0
         self._start_time = time.time()
+        self._real_time_start = time.time()
+        self._sim_time = 0.0
+        
+        # Reset timing statistics
+        self._timing_stats = {
+            'target_real_time': 0.0,
+            'actual_real_time': 0.0,
+            'processing_times': [],
+            'sleep_times': []
+        }
+        
         self._reset_requested = False
     
     def is_paused(self) -> bool:
@@ -669,32 +759,35 @@ class SimulationManager:
         self._shutdown_requested = True
         self._running = False
         
+        # Shutdown all robot processes
+        for robot_name, robot in self.robots.items():
+            try:
+                robot.shutdown_processes()
+            except Exception as e:
+                print(f"⚠️ Error shutting down robot '{robot_name}': {e}")
+        
+        # Shutdown all object processes
+        for object_name, obj in self.objects.items():
+            try:
+                obj.stop_motion_process()
+            except Exception as e:
+                print(f"⚠️ Error shutting down object '{object_name}': {e}")
+        
         # Clean up visualization safely
         if self.visualizer:
             try:
                 if hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
-                    # Try gentle close first
-                    try:
-                        self.visualizer.plotter.close()
-                    except:
-                        # If gentle close fails, try more forceful cleanup
-                        try:
-                            if hasattr(self.visualizer.plotter, '_exit'):
-                                self.visualizer.plotter._exit()
-                        except:
-                            pass
-                    # Clear the plotter reference
+                    self.visualizer.plotter.close()
                     self.visualizer.plotter = None
             except Exception as e:
                 print(f"⚠️ Visualization cleanup warning: {e}")
             finally:
-                # Always clear the visualizer reference
                 self.visualizer = None
         
         # SimPy processes are automatically cleaned up when environment shuts down
-        if self._simulation_process:
+        if self._control_callback_process:
             try:
-                self._simulation_process.interrupt()
+                self._control_callback_process.interrupt()
             except Exception:
                 pass
         

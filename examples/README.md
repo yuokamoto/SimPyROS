@@ -1,275 +1,150 @@
 # SimPyROS Examples
 
-This directory contains streamlined examples showcasing the enhanced SimPyROS robotics simulation framework, organized by functionality and focused on the new architecture.
+Welcome to SimPyROS examples! These are organized by difficulty level to help you learn the framework progressively.
 
-## 📁 Directory Structure (New Architecture)
+## 🚀 Quick Start
 
-### 🚀 `simple/` - Enhanced SimPyROS Examples ⭐**Recommended**
-**Modern SimulationManager-based examples demonstrating the improved interface**
-
-#### `basic_simulation.py` - Simplified Robot Control
 ```bash
-python simple/basic_simulation.py
+# 1. Activate environment
+source simpyros-env/bin/activate
+
+# 2. Start with beginner examples
+cd examples/beginner
+python basic_simulation.py
+
+# 3. Explore advanced multi-robot behaviors
+cd ../advanced
+python advanced_simpy_demo.py
 ```
-**Features:**
-- ✅ **Code Reduction**: ~100 lines → ~20 lines
-- ✅ **4-Joint Articulated Arm**: Realistic robot structure
-- ✅ **Multi-Robot Support**: Different robot types
-- ✅ **Automatic Management**: Environment, visualization, cleanup
-- ✅ **Real-time Factor**: Configurable simulation speed
 
-#### `mesh_robots.py` - External Robot Repositories
-```bash
-# Setup external repositories
-python simple/mesh_robots.py --setup-repos
+## 📁 Directory Structure
 
-# TurtleBot3 with 3D meshes
-python simple/mesh_robots.py --robot turtlebot3 --variant waffle_pi
+### 🟢 [beginner/](beginner/) - Start Here
+Perfect for first-time users and learning the basics.
 
-# UR5 robot arm
-python simple/mesh_robots.py --robot ur5 --variant ur5e
-```
-**Features:**
-- ✅ **Automatic Repository Cloning**: TurtleBot3, UR5 support
-- ✅ **3D Mesh Loading**: STL/OBJ/DAE mesh files  
-- ✅ **Performance Optimization**: Mesh simplification
-- ✅ **Multiple Variants**: Different robot configurations
+- **[basic_simulation.py](beginner/basic_simulation.py)** - Essential starting point
+  - Single robot with movement and visualization
+  - Interactive controls (play/pause, speed, reset)
+  - ~20 lines of user code for complete simulation
 
-#### `link_connections.py` - Robot Link Attachment System
-```bash
-python simple/link_connections.py
-python simple/link_connections.py --demo rigid      # Rigid attachment
-python simple/link_connections.py --demo sensor     # Smart sensor mode
-```
-**Features:**
-- ✅ **Hierarchical Motion**: Objects follow joint motion
-- ✅ **Multiple Connection Modes**: Rigid, flexible, sensor
-- ✅ **Real-time Tracking**: Objects move with robot links
-- ✅ **Smart Sensors**: Configurable sensor behavior
+### 🟡 [intermediate/](intermediate/) - Build Skills
+Advanced features and external integrations.
 
-#### `all_features_demo.py` - Complete Integration
-```bash
-python simple/all_features_demo.py              # Full demo
-python simple/all_features_demo.py --quick      # Without external repos
-python simple/all_features_demo.py --headless   # Performance test
-```
-**Features:**
-- ✅ **All Features Together**: Mesh loading + link connections + multi-robot
-- ✅ **Smart Sensors**: Real-time data processing
-- ✅ **Performance Metrics**: Comprehensive statistics
-- ✅ **Scalable Architecture**: 4+ robots with sensors
+- **[link_connections.py](intermediate/link_connections.py)** - Object-robot attachments
+- **[mesh_robots.py](intermediate/mesh_robots.py)** - External robot models (TurtleBot3, UR5)
+- **[pyvista/](intermediate/pyvista/)** - Direct PyVista visualization examples
 
-### 🎮 `pyvista/` - PyVista 3D Visualization
-**Specialized PyVista demonstrations with built-in geometric robots**
+### 🔴 [advanced/](advanced/) - Master the Framework
+Complex behaviors showcasing SimPy's full power.
 
-#### `pyvista_robot_demo.py` - Interactive Robot Showcase
-```bash
-python pyvista/pyvista_robot_demo.py 10 wheeled_robot     # Wheeled robot
-python pyvista/pyvista_robot_demo.py 15 basic_robot       # Basic robot  
-python pyvista/pyvista_robot_demo.py 20 quadcopter        # Quadcopter
-```
-**Features:**
-- ✅ **Interactive 3D**: Mouse controls (rotate, zoom, pan)
-- ✅ **Built-in Robot Types**: Geometric robot models
-- ✅ **Motion Patterns**: Figure-8 and trajectory trails
-- ✅ **Live Display**: FPS and position information
+- **[advanced_simpy_demo.py](advanced/advanced_simpy_demo.py)** ⭐ **Featured**
+  - Multi-robot coordination with independent behaviors
+  - Event-driven SimPy processes demonstration
+  - Patrol, search, and follower robots
+- **[all_features_demo.py](advanced/all_features_demo.py)** - Complete feature showcase
 
-### 🤖 `robots/` - URDF Robot Models
-**Modern URDF files with enhanced structure and clear naming**
+## 🎯 Learning Path
 
-- **`articulated_arm_robot.urdf`** - 4-DOF realistic arm robot (main learning robot)
-- **`collision_robot.urdf`** - Multi-robot scenarios with collision detection  
-- **`mobile_robot.urdf`** - Mobile base with sensors and camera
+1. **Start**: `beginner/basic_simulation.py` - Learn the fundamentals
+2. **Expand**: `intermediate/link_connections.py` - Understand object relationships
+3. **Explore**: `intermediate/mesh_robots.py` - Work with real robot models
+4. **Master**: `advanced/advanced_simpy_demo.py` - See the architecture's true power
 
-## 🔄 Before vs After (Architecture Improvement)
+## 🏗️ Architecture Highlights
 
-### Before (Legacy Architecture ~100 lines)
+SimPyROS uses **SimPy's RealtimeEnvironment** with **independent processes** for each robot subsystem:
+
 ```python
-# Manual everything...
-env = simpy.Environment()
-robot = create_robot_from_urdf(env, urdf_path, "robot")  
-visualizer = create_urdf_robot_visualizer()
-# ... 90+ more lines of manual setup, threading, cleanup
+# Modern SimPy Architecture (Current)
+robot.start_joint_control_process()    # 100 Hz joint control
+robot.start_sensor_process()          # 30 Hz sensor processing  
+robot.start_navigation_process()      # 10 Hz path planning
+robot.start_base_motion_process()     # 100 Hz motion control
+
+# Each process runs independently with proper SimPy yielding!
 ```
 
-### After (New SimulationManager ~20 lines)
-```python
-from core.simulation_manager import SimulationManager
+This replaces single-loop centralized designs and leverages SimPy's event-driven strengths.
 
-# 1. Create simulation
-sim = SimulationManager()
+## 🎮 Interactive Features
 
-# 2. Add robot  
-robot = sim.add_robot_from_urdf("my_robot", urdf_path)
+All examples include:
+- **Real-time factor control** (0.1x to 5.0x speed)
+- **Play/Pause/Reset** buttons
+- **Coordinate axis toggle**
+- **Wireframe mode**
+- **Simulation time display**
 
-# 3. Define control
-def control(dt):
-    for joint_name in robot.get_joint_names():
-        sim.set_robot_joint_position("my_robot", joint_name, math.sin(time.time()))
+## 🤖 Robot Models
 
-# 4. Run
-sim.set_robot_control_callback("my_robot", control)
-sim.run(duration=10.0)
-```
+Examples use three main robots from `examples/robots/`:
 
-## 🚀 Quick Start Guide
+- **articulated_arm_robot.urdf** - 4-DOF arm for manipulation demos
+- **collision_robot.urdf** - Multi-robot collision scenarios
+- **mobile_robot.urdf** - Mobile base with sensors
 
-### 1. Basic Robot Control (Start Here)
+External robots (intermediate examples):
+- **TurtleBot3** - Popular mobile robot
+- **UR5** - Industrial robot arm
+
+## 🔧 Prerequisites
+
 ```bash
-python simple/basic_simulation.py
-```
-**What you'll see:** 4-joint articulated arm robot with realistic motion
-
-### 2. External Mesh Robots
-```bash
-python simple/mesh_robots.py --robot turtlebot3
-```
-**What you'll see:** Real TurtleBot3 with 3D meshes from official repository
-
-### 3. Multi-Robot with Sensors
-```bash
-python simple/all_features_demo.py
-```
-**What you'll see:** Multiple robots with attached sensors and real-time data
-
-### 4. Interactive PyVista Demo
-```bash
-python pyvista/pyvista_robot_demo.py 10
-```
-**What you'll see:** Interactive 3D window with mouse controls
-
-## 📊 Feature Comparison
-
-| Demo | Code Lines | 3D Mesh | Multi-Robot | Link Connect | Real-time | External Repos |
-|------|------------|---------|-------------|--------------|-----------|----------------|
-| **basic_simulation.py** | ~20 | ✅ | ✅ | ❌ | ✅ | ❌ |
-| **mesh_robots.py** | ~25 | ✅ | ❌ | ❌ | ✅ | ✅ |
-| **link_connections.py** | ~30 | ✅ | ❌ | ✅ | ✅ | ❌ |
-| **all_features_demo.py** | ~35 | ✅ | ✅ | ✅ | ✅ | ✅ |
-
-## 🤖 Supported External Robots
-
-### TurtleBot3 (ROBOTIS-GIT)
-- **Variants**: burger, waffle, waffle_pi
-- **Features**: Mobile base, camera, LIDAR
-- **Repository**: Auto-cloned from https://github.com/ROBOTIS-GIT/turtlebot3
-
-### UR5 Robot Arm (Universal Robots)  
-- **Variants**: ur3, ur3e, ur5, ur5e, ur10, ur10e, ur16e
-- **Features**: 6-DOF industrial arm
-- **Repository**: Auto-cloned from Universal Robots ROS2 description
-
-## 🛠 Requirements
-
-### Core Dependencies
-```bash
-# Install SimPyROS requirements
-pip install -r requirements.txt
-
-# Verify installation
-source simpyros-env/bin/activate  # Use virtual environment
-python -c "import pyvista, simpy, numpy; print('✅ All dependencies OK')"
-```
-
-### Virtual Environment (Recommended)
-```bash
-# Activate the pre-configured environment
+# Virtual environment setup
 source simpyros-env/bin/activate
 
-# All examples will work correctly
-python simple/basic_simulation.py
+# Required packages (should already be installed)
+pip install simpy pyvista yourdfpy numpy scipy
 ```
 
-## 💡 Learning Path
+## 🆘 Troubleshooting
 
-### 🎓 Recommended Progression
-1. **`simple/basic_simulation.py`** - Learn the new simplified interface
-2. **`simple/mesh_robots.py`** - Experience 3D mesh loading
-3. **`simple/link_connections.py`** - Understand object attachment
-4. **`simple/all_features_demo.py`** - See everything working together
-5. **`pyvista/pyvista_robot_demo.py`** - Interactive 3D exploration
-
-### 🎯 Goal-Oriented Paths
-
-**Learning Robot Control:**
-- `basic_simulation.py` → `all_features_demo.py`
-
-**Learning 3D Mesh Loading:**
-- `mesh_robots.py` → Learn TurtleBot3 and UR5 integration
-
-**Learning Interactive 3D:**
-- `pyvista/pyvista_robot_demo.py` → Explore different robot types
-
-## 🎮 Interactive Controls
-
-**All 3D visualization demos support:**
-- **Mouse Left + Drag:** Rotate camera
-- **Mouse Right + Drag:** Zoom  
-- **Mouse Middle + Drag:** Pan
-- **Mouse Wheel:** Quick zoom
-- **'r' Key:** Reset view
-- **'q' Key or Close:** Exit
-
-## ⚠️ Troubleshooting
-
-### Window Not Displaying
+### Display Issues
 ```bash
-# Use the virtual environment
-source simpyros-env/bin/activate
-python simple/basic_simulation.py
+# Check DISPLAY variable
+echo $DISPLAY
 
-# Check PyVista installation
-python -c "import pyvista as pv; print(f'PyVista {pv.__version__} OK')"
+# If empty, visualization will run in headless mode
+export DISPLAY=:0  # Adjust as needed
 ```
 
-### External Repository Issues
+### URDF Loading Issues
 ```bash
-# Manual setup if auto-clone fails
-python simple/mesh_robots.py --setup-repos
+# Verify robot files exist
+ls examples/robots/*.urdf
+
+# For external mesh examples, ensure git access
+git --version
 ```
 
-### Import Errors
-```bash
-# Ensure correct path and virtual environment
-cd /path/to/SimPyROS
-source simpyros-env/bin/activate
-```
+### Performance Issues
+- Lower real-time factor if simulation is slow
+- Use headless mode for maximum performance
+- Check available system resources
 
-## 📋 Quick Command Reference
+## 📊 Performance Expectations
 
-```bash
-# New Architecture Examples (Recommended)
-python simple/basic_simulation.py              # Main demo
-python simple/mesh_robots.py --robot turtlebot3 # External robots  
-python simple/link_connections.py              # Object attachment
-python simple/all_features_demo.py             # Complete system
+- **Beginner**: 60+ FPS with visualization, 1000+ FPS headless
+- **Intermediate**: 30+ FPS with complex meshes
+- **Advanced**: 30+ FPS with multiple robots, scales with robot count
 
-# PyVista Specialized
-python pyvista/pyvista_robot_demo.py 10        # Interactive 3D
+## 🎓 Learning Objectives
 
-# External Robot Variants
-python simple/mesh_robots.py --robot turtlebot3 --variant burger
-python simple/mesh_robots.py --robot ur5 --variant ur5e
-```
+By completing these examples, you'll understand:
 
-## 🏗️ Legacy Code
+1. **SimPy Fundamentals**: Event-driven simulation with RealtimeEnvironment
+2. **Robot Control**: Joint-level and base-level motion control
+3. **Visualization**: Interactive 3D visualization with PyVista
+4. **Architecture**: Independent process design vs single-loop approaches
+5. **Coordination**: Multi-robot behaviors and object interactions
 
-**Moved to `../legacy/` for reference:**
-- `legacy/urdf_old/` - Old URDF processing examples
-- `legacy/basic_old/` - Basic foundation examples  
-- `legacy/robot_demo.py` - Original robot class demo
-- `legacy/visualization_demos.py` - Separated visualization functions
+## 📚 Next Steps
 
-## 🎉 Success Metrics
+After mastering these examples:
+- Explore the [core/](../core/) module documentation
+- Create custom robot behaviors
+- Implement your own URDF robots
+- Build multi-robot coordination algorithms
+- Integrate with ROS 2 systems
 
-The new SimPyROS architecture achieves:
-
-✅ **80% Code Reduction**: From ~100 lines to ~20 lines for basic simulations
-✅ **External Repository Support**: Automatic TurtleBot3 and UR5 integration
-✅ **Link Connection System**: Objects follow robot joint motion
-✅ **Multi-Robot Scalability**: 4+ robots with real-time performance (60+ FPS)
-✅ **Modern Architecture**: Clean, maintainable, extensible design
-
----
-
-**Focus:** Modern SimulationManager-based examples showcasing the enhanced SimPyROS capabilities with dramatically simplified usage and powerful new features.
+Happy simulating! 🚀

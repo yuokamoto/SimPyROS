@@ -45,7 +45,7 @@ def simple_control_example():
                 sim.set_robot_joint_position("my_robot", joint_name, position)
         
         sim.set_robot_control_callback("my_robot", my_control, frequency=20.0)
-        sim.run(duration=1.0, auto_close=True)
+        sim.run(duration=10.0, auto_close=True)
         
     except Exception as e:
         print(f"⚠️ Example error: {e}")
@@ -190,9 +190,9 @@ def main():
     
     examples = [
         ("Simple Control", simple_control_example),
-        ("Mobile Robot", mobile_robot_example),
-        ("Multi-Robot", multi_robot_example),
-        ("Headless Mode", headless_example)
+        # ("Mobile Robot", mobile_robot_example),
+        # ("Multi-Robot", multi_robot_example),
+        # ("Headless Mode", headless_example)
     ]
     
     for i, (name, func) in enumerate(examples):

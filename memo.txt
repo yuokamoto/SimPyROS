@@ -46,3 +46,16 @@
 - meshが半透明のまま
 - 現在のシミュレーション経過時間を表示してほしい。
 - ボタンと文字を小さくして、文字をボタンの上に重ねてほしい
+
+10. time management
+- sim_timeをsimulation managerで管理するようにしましょう。
+- また、sim timeのようなglobalな変数をsimulation_managerで保持して、全てのオブジェクトからアクセスできるようにしましょう。
+- さらに、simulation_objectやrobotでは、simulation_managerをへのポインターをメンバ変数としてもつことでsim timeにアクセスして、その数値でupdate loopを回しましょう
+- visualizerもsimulation_manager経由でsim timeやtimeにアクセスしてupdate, 時間表示をしましょう
+- real_time_factor==0のときは、CPUが動く限り最速で動くようにしてください。
+- 
+
+11. UI
+- ボタンの上にボタンの役割がわかるように文字を表示してください
+- ボタンやスライダー、sim timeなどの表示はスペースキーを押すことで表示のON/OFFができるようにしてください。
+- simulation全体のupdateのtime_stepを変更できるようにしてください。

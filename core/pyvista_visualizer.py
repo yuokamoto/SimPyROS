@@ -22,6 +22,13 @@ try:
 except ImportError:
     URDF_SUPPORT = False
 
+# Import time management
+try:
+    from core.time_manager import TimeManager, get_global_time_manager
+    TIME_MANAGER_SUPPORT = True
+except ImportError:
+    TIME_MANAGER_SUPPORT = False
+
 
 class PyVistaVisualizer:
     """
@@ -454,8 +461,9 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         self.simulation_paused = False
         self.simulation_running = False
         
-        # SimulationManager connection for real-time factor control (8.2)
-        self._connected_simulation_manager = None
+        # TimeManager connection for centralized time access
+        self._connected_time_manager = None
+        self._connected_simulation_manager = None  # Legacy compatibility
         
         # Time display tracking
         self._simulation_start_time = None
@@ -605,12 +613,16 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         self.realtime_factor = value
         print(f"⏱️ Visualizer real-time factor slider: {old_value:.2f}x → {value:.2f}x")
         
-        # Update connected SimulationManager if available
-        if hasattr(self, '_connected_simulation_manager') and self._connected_simulation_manager:
+        # Update connected TimeManager if available
+        if self._connected_time_manager:
+            print(f"🔗 Updating connected TimeManager...")
+            self._connected_time_manager.set_real_time_factor(value)
+        # Fallback to connected SimulationManager (legacy)
+        elif self._connected_simulation_manager:
             print(f"🔗 Updating connected SimulationManager...")
             self._connected_simulation_manager.set_realtime_factor(value)
         else:
-            print(f"⚠️ No SimulationManager connected - change will not affect simulation speed")
+            print(f"⚠️ No TimeManager or SimulationManager connected - change will not affect simulation speed")
     
     def _toggle_collision_display(self, value):
         """Toggle collision geometry display"""
@@ -666,19 +678,34 @@ class URDFRobotVisualizer(PyVistaVisualizer):
             print(f"⚠️ Failed to setup time display: {e}")
     
     def update_time_display(self):
-        """Update the simulation elapsed time display"""
-        if self._time_text_actor and self._simulation_start_time:
+        """Update the simulation elapsed time display using centralized time management"""
+        if self._time_text_actor:
             try:
-                current_time = time.time()
-                elapsed_time = current_time - self._simulation_start_time
-                
-                # Get simulation time from connected manager if available
-                sim_time_str = ""
-                if self._connected_simulation_manager and hasattr(self._connected_simulation_manager, 'env'):
-                    sim_time = self._connected_simulation_manager.env.now
-                    sim_time_str = f"Sim: {sim_time:.1f}s | "
-                
-                time_text = f"{sim_time_str}Real: {elapsed_time:.1f}s"
+                # Priority 1: Get time from connected time manager
+                if self._connected_time_manager:
+                    stats = self._connected_time_manager.get_timing_stats()
+                    time_text = f"Sim: {stats.sim_time:.1f}s | Real: {stats.real_time_elapsed:.1f}s | Speed: {stats.actual_speed}"
+                # Priority 2: Get time from connected simulation manager (legacy)
+                elif self._connected_simulation_manager:
+                    sim_time = self._connected_simulation_manager.get_sim_time()
+                    real_time = self._connected_simulation_manager.get_real_time()
+                    time_step = self._connected_simulation_manager.get_time_step()
+                    time_text = f"Sim: {sim_time:.1f}s | Real: {real_time:.1f}s | Step: {time_step:.3f}s"
+                # Priority 3: Global time manager
+                elif TIME_MANAGER_SUPPORT:
+                    global_time_mgr = get_global_time_manager()
+                    if global_time_mgr:
+                        stats = global_time_mgr.get_timing_stats()
+                        time_text = f"Sim: {stats.sim_time:.1f}s | Real: {stats.real_time_elapsed:.1f}s | Speed: {stats.actual_speed}"
+                    else:
+                        time_text = "Time: No TimeManager"
+                else:
+                    # Fallback to real time only
+                    if self._simulation_start_time:
+                        elapsed_time = time.time() - self._simulation_start_time
+                        time_text = f"Real: {elapsed_time:.1f}s"
+                    else:
+                        time_text = "Time: N/A"
                 
                 # Update the text actor
                 self._time_text_actor.SetInput(time_text)
@@ -720,22 +747,47 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         try:
             self._simulation_start_time = time.time()
             if self._time_text_actor:
-                self._time_text_actor.SetInput("Sim: 0.0s | Real: 0.0s")
+                if self._connected_time_manager:
+                    stats = self._connected_time_manager.get_timing_stats()
+                    self._time_text_actor.SetInput(f"Sim: 0.0s | Real: 0.0s | Speed: {stats.target_speed}")
+                elif self._connected_simulation_manager:
+                    time_step = self._connected_simulation_manager.get_time_step()
+                    self._time_text_actor.SetInput(f"Sim: 0.0s | Real: 0.0s | Step: {time_step:.3f}s")
+                else:
+                    self._time_text_actor.SetInput("Sim: 0.0s | Real: 0.0s")
             print("⏰ Time display reset")
         except Exception as e:
             print(f"⚠️ Error resetting time display: {e}")
     
+    def connect_time_manager(self, time_manager: TimeManager):
+        """Connect to a TimeManager for centralized time access"""
+        self._connected_time_manager = time_manager
+        # Sync initial realtime factor
+        self.realtime_factor = time_manager.get_real_time_factor()
+        print(f"🔗 Connected to TimeManager for centralized time access")
+    
     def connect_simulation_manager(self, simulation_manager):
-        """Connect to a SimulationManager for real-time control synchronization"""
+        """Connect to a SimulationManager for real-time control synchronization (legacy support)"""
         self._connected_simulation_manager = simulation_manager
+        
+        # Also connect to its time manager if available
+        if hasattr(simulation_manager, 'time_manager') and simulation_manager.time_manager:
+            self.connect_time_manager(simulation_manager.time_manager)
+        
         # Sync initial realtime factor
         if hasattr(simulation_manager, 'config') and hasattr(simulation_manager.config, 'real_time_factor'):
             self.realtime_factor = simulation_manager.config.real_time_factor
         print(f"🔗 Connected to SimulationManager for real-time factor control")
     
+    def disconnect_time_manager(self):
+        """Disconnect from TimeManager"""
+        self._connected_time_manager = None
+        print(f"🔗 Disconnected from TimeManager")
+    
     def disconnect_simulation_manager(self):
         """Disconnect from SimulationManager"""
         self._connected_simulation_manager = None
+        self.disconnect_time_manager()
         print(f"🔗 Disconnected from SimulationManager")
     
     def _create_mesh_from_urdf(self, urdf_path: str, package_path: Optional[str] = None):

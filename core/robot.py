@@ -5,14 +5,18 @@ Designed for ROS 2 integration with joint-level control
 """
 
 import simpy
+import simpy.rt
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Tuple, Any, Union, Generator
 from dataclasses import dataclass
 from enum import Enum
 import warnings
+import time
+import threading
 
 from core.simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
 from core.urdf_loader import URDFLoader, URDFLink, URDFJoint
+from core.time_manager import TimeManager, get_global_time_manager
 from scipy.spatial.transform import Rotation
 
 
@@ -205,21 +209,23 @@ class RobotParameters(ObjectParameters):
 
 class Robot(SimulationObject):
     """
-    Advanced Robot class with URDF loading and joint-level control
+    Advanced Robot class with independent SimPy processes for different subsystems
     
     Features:
     - URDF-based robot description loading
-    - Individual joint control (position, velocity, effort modes)
+    - Independent SimPy processes for joint control, sensors, navigation, etc.
+    - Event-driven robot behaviors
     - ROS 2 compatible interfaces
     - Real-time forward kinematics
-    - Hierarchical control (robot-level + joint-level)
+    - Scalable multi-process architecture
     """
     
-    def __init__(self, env: simpy.Environment, parameters: RobotParameters):
+    def __init__(self, env: simpy.Environment, parameters: RobotParameters, time_manager: Optional[TimeManager] = None):
         # Initialize parent SimulationObject
-        super().__init__(env, parameters)
+        super().__init__(env, parameters, time_manager)
         
         self.robot_parameters = parameters
+        self.time_manager = time_manager or get_global_time_manager()
         
         # URDF and robot structure
         self.urdf_loader: Optional[URDFLoader] = None
@@ -232,14 +238,27 @@ class Robot(SimulationObject):
         self.base_link_name: str = ""
         self.robot_name: str = "unknown_robot"
         
-        # Control state
+        # Control state - thread-safe for multi-process access
         self.joint_command_queue: List[JointCommand] = []
+        self._joint_command_lock = threading.Lock()
+        
+        # SimPy process references
+        self._joint_control_process = None
+        self._sensor_process = None
+        self._navigation_process = None
+        self._base_motion_process = None
+        
+        # Process control flags
+        self._processes_active = False
+        self._joint_control_frequency = self.robot_parameters.joint_update_rate
+        self._sensor_frequency = 30.0  # Hz
+        self._navigation_frequency = 10.0  # Hz
         
         # Load URDF
         self._load_urdf()
         
-        # Start joint control process
-        self.joint_process = env.process(self._joint_control_loop())
+        # Start independent SimPy processes
+        self._start_robot_processes()
     
     def _load_urdf(self) -> bool:
         """Load robot from URDF file"""
@@ -298,25 +317,163 @@ class Robot(SimulationObject):
         # Fallback to first link
         return self.link_names[0] if self.link_names else "unknown"
     
-    def _joint_control_loop(self):
-        """High-frequency joint control loop"""
-        dt = 1.0 / self.robot_parameters.joint_update_rate
+    def _start_robot_processes(self):
+        """Start independent SimPy processes for different robot subsystems"""
+        if not self._processes_active:
+            self._processes_active = True
+            
+            # Start joint control process
+            self._joint_control_process = self.env.process(self._joint_control_process_loop())
+            
+            # Start sensor processing process
+            self._sensor_process = self.env.process(self._sensor_process_loop())
+            
+            # Start base motion process 
+            self._base_motion_process = self.env.process(self._base_motion_process_loop())
+            
+            # Navigation process starts on demand
+            print(f"🤖 Robot '{self.robot_name}': Started independent SimPy processes")
+    
+    def _joint_control_process_loop(self) -> Generator:
+        """Independent SimPy process for high-frequency joint control"""
+        joint_dt = 1.0 / self._joint_control_frequency
         
-        while True:
-            # Process joint command queue
-            while self.joint_command_queue:
-                command = self.joint_command_queue.pop(0)
-                if command.name in self.joints:
-                    self.joints[command.name].set_command(command)
+        while self._processes_active:
+            try:
+                # Process joint command queue (thread-safe)
+                with self._joint_command_lock:
+                    while self.joint_command_queue:
+                        command = self.joint_command_queue.pop(0)
+                        if command.name in self.joints:
+                            self.joints[command.name].set_command(command)
+                
+                # Update all joints
+                for joint in self.joints.values():
+                    joint.update(joint_dt)
+                
+                # Update forward kinematics
+                self._update_forward_kinematics()
+                
+            except Exception as e:
+                print(f"⚠️ Robot '{self.robot_name}' joint control error: {e}")
             
-            # Update all joints
-            for joint in self.joints.values():
-                joint.update(dt)
+            # Yield control with joint control frequency
+            yield self.env.timeout(joint_dt)
+    
+    def _sensor_process_loop(self) -> Generator:
+        """Independent SimPy process for sensor data processing"""
+        sensor_dt = 1.0 / self._sensor_frequency
+        
+        while self._processes_active:
+            try:
+                # Process sensor data (placeholder for future expansion)
+                self._process_sensors()
+                
+            except Exception as e:
+                print(f"⚠️ Robot '{self.robot_name}' sensor processing error: {e}")
             
-            # Update link poses based on current joint states
-            self._update_forward_kinematics()
+            # Yield control with sensor frequency
+            yield self.env.timeout(sensor_dt)
+    
+    def _base_motion_process_loop(self) -> Generator:
+        """Independent SimPy process for robot base motion"""
+        base_dt = 1.0 / 100.0  # 100 Hz for smooth base motion
+        
+        while self._processes_active:
+            try:
+                # Update base motion (inherited from SimulationObject)
+                if self.parameters.object_type == ObjectType.DYNAMIC:
+                    self._update_base_motion(base_dt)
+                
+            except Exception as e:
+                print(f"⚠️ Robot '{self.robot_name}' base motion error: {e}")
             
-            yield self.env.timeout(dt)
+            # Yield control with base motion frequency
+            yield self.env.timeout(base_dt)
+    
+    def start_navigation_process(self, target_pose: Optional[Pose] = None) -> bool:
+        """Start autonomous navigation process"""
+        if self._navigation_process is None:
+            self._navigation_process = self.env.process(self._navigation_process_loop(target_pose))
+            print(f"🧭 Robot '{self.robot_name}': Navigation process started")
+            return True
+        return False
+    
+    def stop_navigation_process(self):
+        """Stop autonomous navigation process"""
+        if self._navigation_process:
+            try:
+                self._navigation_process.interrupt()
+                self._navigation_process = None
+                print(f"🛑 Robot '{self.robot_name}': Navigation process stopped")
+            except Exception as e:
+                print(f"⚠️ Error stopping navigation process: {e}")
+    
+    def _navigation_process_loop(self, target_pose: Optional[Pose] = None) -> Generator:
+        """Independent SimPy process for autonomous navigation"""
+        nav_dt = 1.0 / self._navigation_frequency
+        
+        try:
+            while self._processes_active and target_pose:
+                # Simple navigation logic (can be extended)
+                current_pose = self.get_pose()
+                distance = np.linalg.norm(target_pose.position - current_pose.position)
+                
+                if distance < 0.1:  # Reached target
+                    print(f"🎯 Robot '{self.robot_name}': Reached navigation target")
+                    break
+                
+                # Calculate velocity towards target
+                direction = (target_pose.position - current_pose.position) / distance
+                speed = min(1.0, distance)  # Max speed 1.0 m/s
+                
+                # Set velocity
+                nav_velocity = Velocity(linear_x=direction[0] * speed, 
+                                      linear_y=direction[1] * speed)
+                self.set_velocity(nav_velocity)
+                
+                # Yield control with navigation frequency
+                yield self.env.timeout(nav_dt)
+                
+        except simpy.Interrupt:
+            print(f"🛑 Robot '{self.robot_name}': Navigation interrupted")
+        except Exception as e:
+            print(f"⚠️ Robot '{self.robot_name}' navigation error: {e}")
+        finally:
+            # Stop when navigation ends
+            self.stop()
+            self._navigation_process = None
+    
+    def _process_sensors(self):
+        """Process sensor data (placeholder for future expansion)"""
+        # Placeholder for sensor processing
+        # Could include: LIDAR, cameras, IMU, encoders, etc.
+        pass
+    
+    def _update_base_motion(self, dt: float):
+        """Update robot base motion (integration from SimulationObject)"""
+        # Check if connected to any STATIC objects - if so, cannot move
+        if self._is_connected_to_static_object():
+            return
+        
+        # Simple velocity integration
+        linear_delta = self.velocity.linear * dt
+        world_linear_delta = self.pose.rotation.apply(linear_delta)
+        new_position = self.pose.position + world_linear_delta
+        
+        # Update rotation using angular velocity
+        angular_delta = self.velocity.angular * dt
+        if np.linalg.norm(angular_delta) > 1e-8:
+            delta_rotation = Rotation.from_rotvec(angular_delta)
+            new_rotation = self.pose.rotation * delta_rotation
+        else:
+            new_rotation = self.pose.rotation
+        
+        # Update pose
+        self.pose = Pose.from_position_rotation(new_position, new_rotation)
+        
+        # Update connected objects
+        self._update_connected_objects()
     
     def _update_forward_kinematics(self):
         """Update all link poses based on current joint positions"""
@@ -393,7 +550,7 @@ class Robot(SimulationObject):
     # ====================
     
     def set_joint_position(self, joint_name: str, position: float, max_velocity: Optional[float] = None):
-        """Set target position for a joint - ROS 2 style interface"""
+        """Set target position for a joint - ROS 2 style interface (thread-safe)"""
         if joint_name not in self.joints:
             warnings.warn(f"Joint '{joint_name}' not found in robot")
             return
@@ -404,10 +561,13 @@ class Robot(SimulationObject):
             target_position=position,
             max_velocity=max_velocity
         )
-        self.joint_command_queue.append(command)
+        
+        # Thread-safe command queue access
+        with self._joint_command_lock:
+            self.joint_command_queue.append(command)
     
     def set_joint_velocity(self, joint_name: str, velocity: float, max_effort: Optional[float] = None):
-        """Set target velocity for a joint - ROS 2 style interface"""
+        """Set target velocity for a joint - ROS 2 style interface (thread-safe)"""
         if joint_name not in self.joints:
             warnings.warn(f"Joint '{joint_name}' not found in robot")
             return
@@ -418,10 +578,13 @@ class Robot(SimulationObject):
             target_velocity=velocity,
             max_effort=max_effort
         )
-        self.joint_command_queue.append(command)
+        
+        # Thread-safe command queue access
+        with self._joint_command_lock:
+            self.joint_command_queue.append(command)
     
     def set_joint_effort(self, joint_name: str, effort: float, max_velocity: Optional[float] = None):
-        """Set target effort (torque/force) for a joint - ROS 2 style interface"""
+        """Set target effort (torque/force) for a joint - ROS 2 style interface (thread-safe)"""
         if joint_name not in self.joints:
             warnings.warn(f"Joint '{joint_name}' not found in robot")
             return
@@ -432,7 +595,10 @@ class Robot(SimulationObject):
             target_effort=effort,
             max_velocity=max_velocity
         )
-        self.joint_command_queue.append(command)
+        
+        # Thread-safe command queue access
+        with self._joint_command_lock:
+            self.joint_command_queue.append(command)
     
     def set_joint_positions(self, joint_positions: Dict[str, float], max_velocity: Optional[float] = None):
         """Set multiple joint positions simultaneously - ROS 2 trajectory style"""
@@ -449,9 +615,43 @@ class Robot(SimulationObject):
         self.set_joint_velocity(joint_name, 0.0)
     
     def stop_all_joints(self):
-        """Stop all joints"""
-        for joint_name in self.joint_names:
-            self.stop_joint(joint_name)
+        """Stop all joints (thread-safe)"""
+        with self._joint_command_lock:
+            # Clear command queue and add stop commands
+            self.joint_command_queue.clear()
+            for joint_name in self.joint_names:
+                self.stop_joint(joint_name)
+    
+    def shutdown_processes(self):
+        """Shutdown all robot processes"""
+        self._processes_active = False
+        
+        # Interrupt all processes
+        if self._joint_control_process:
+            try:
+                self._joint_control_process.interrupt()
+            except Exception:
+                pass
+        
+        if self._sensor_process:
+            try:
+                self._sensor_process.interrupt()
+            except Exception:
+                pass
+        
+        if self._base_motion_process:
+            try:
+                self._base_motion_process.interrupt()
+            except Exception:
+                pass
+        
+        if self._navigation_process:
+            try:
+                self._navigation_process.interrupt()
+            except Exception:
+                pass
+        
+        print(f"🔻 Robot '{self.robot_name}': All processes shutdown")
     
     # ====================
     # State Query Interface (ROS 2 compatible)
@@ -750,19 +950,21 @@ def create_robot_from_urdf(env: simpy.Environment,
                           urdf_path: str,
                           robot_name: str = "robot",
                           initial_pose: Optional[Pose] = None,
-                          joint_update_rate: float = 100.0) -> Robot:
+                          joint_update_rate: float = 100.0,
+                          time_manager: Optional[TimeManager] = None) -> Robot:
     """
-    Factory function to create a robot from URDF - simplified interface
+    Factory function to create a robot from URDF with independent SimPy processes
     
     Args:
-        env: SimPy environment
+        env: SimPy environment (preferably RealtimeEnvironment)
         urdf_path: Path to URDF file
         robot_name: Name for the robot object
         initial_pose: Initial pose (default: origin)
         joint_update_rate: Joint control frequency in Hz
+        time_manager: TimeManager instance for centralized time access
     
     Returns:
-        Robot instance
+        Robot instance with independent SimPy processes
     """
     if initial_pose is None:
         initial_pose = Pose()
@@ -772,28 +974,30 @@ def create_robot_from_urdf(env: simpy.Environment,
         object_type=ObjectType.DYNAMIC,
         urdf_path=urdf_path,
         initial_pose=initial_pose,
-        update_interval=0.01,  # 100 Hz for robot base
+        update_interval=0.01,  # Base motion frequency
         joint_update_rate=joint_update_rate
     )
     
-    return Robot(env, parameters)
+    return Robot(env, parameters, time_manager)
 
 
 def create_robot_programmatically(env: simpy.Environment,
                                  robot_name: str = "programmatic_robot",
                                  initial_pose: Optional[Pose] = None,
-                                 joint_update_rate: float = 100.0) -> Robot:
+                                 joint_update_rate: float = 100.0,
+                                 time_manager: Optional[TimeManager] = None) -> Robot:
     """
-    Factory function to create an empty robot for programmatic construction
+    Factory function to create an empty robot for programmatic construction with SimPy processes
     
     Args:
-        env: SimPy environment
+        env: SimPy environment (preferably RealtimeEnvironment)
         robot_name: Name for the robot object
         initial_pose: Initial pose (default: origin)
         joint_update_rate: Joint control frequency in Hz
+        time_manager: TimeManager instance for centralized time access
     
     Returns:
-        Robot instance ready for programmatic construction
+        Robot instance ready for programmatic construction with independent processes
     """
     if initial_pose is None:
         initial_pose = Pose()
@@ -812,10 +1016,11 @@ def create_robot_programmatically(env: simpy.Environment,
     robot = Robot.__new__(Robot)
     robot.env = env
     robot.robot_parameters = parameters
+    robot.time_manager = time_manager or get_global_time_manager()
     
     # Initialize parent SimulationObject
     from core.simulation_object import SimulationObject
-    SimulationObject.__init__(robot, env, parameters)
+    SimulationObject.__init__(robot, env, parameters, time_manager)
     
     # Initialize robot-specific attributes
     robot.urdf_loader = None  # No URDF loader for programmatic robots
@@ -826,8 +1031,21 @@ def create_robot_programmatically(env: simpy.Environment,
     robot.base_link_name = ""
     robot.robot_name = robot_name
     robot.joint_command_queue = []
+    robot._joint_command_lock = threading.Lock()
+    
+    # Process control
+    robot._processes_active = False
+    robot._joint_control_frequency = joint_update_rate
+    robot._sensor_frequency = 30.0
+    robot._navigation_frequency = 10.0
+    
+    # Process references
+    robot._joint_control_process = None
+    robot._sensor_process = None
+    robot._navigation_process = None
+    robot._base_motion_process = None
     
     print(f"✅ Created empty robot '{robot_name}' for programmatic construction")
-    print("   Use add_link(), add_joint(), and finalize_robot() to build the robot")
+    print("   Use add_link(), add_joint(), finalize_robot() to build, then processes will start automatically")
     
     return robot

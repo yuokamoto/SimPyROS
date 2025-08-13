@@ -1,10 +1,12 @@
 import simpy
+import simpy.rt
 from dataclasses import dataclass
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Generator
 from enum import Enum
 import math
 import copy
 import numpy as np
+import threading
 from scipy.spatial.transform import Rotation
 
 
@@ -195,32 +197,68 @@ class ObjectParameters:
 
 
 class SimulationObject:
-    def __init__(self, env: simpy.Environment, parameters: ObjectParameters):
+    def __init__(self, env: simpy.Environment, parameters: ObjectParameters, time_manager=None):
         self.env = env
         self.parameters = parameters
         self.pose = parameters.initial_pose
         self.velocity = Velocity.zero()
         self._running = False
         
-        # Connection system (bidirectional)
+        # Reference to time manager for centralized time access
+        self.time_manager = time_manager
+        
+        # Connection system (bidirectional) - thread-safe
         self.connected_objects: List['SimulationObject'] = []
         self.relative_poses: Dict['SimulationObject', Pose] = {}
+        self._connection_lock = threading.Lock()
         
-        if parameters.object_type == ObjectType.DYNAMIC:
-            self.process = env.process(self._update_loop())
+        # Independent SimPy process for object motion
+        self._motion_process = None
+        self._process_active = False
+        
+        # Start motion process for dynamic objects
+        if self.parameters.object_type == ObjectType.DYNAMIC:
+            self._start_motion_process()
     
-    def _update_loop(self):
-        while True:
-            if self._running:
-                self._update_state()
-            yield self.env.timeout(self.parameters.update_interval)
+    def _start_motion_process(self):
+        """Start independent SimPy process for object motion"""
+        if not self._process_active and self.parameters.object_type == ObjectType.DYNAMIC:
+            self._process_active = True
+            self._motion_process = self.env.process(self._motion_process_loop())
+            print(f"🔄 SimulationObject '{self.parameters.name}': Motion process started")
     
-    def _update_state(self):
+    def _motion_process_loop(self) -> Generator:
+        """Independent SimPy process for object motion updates"""
+        dt = self.parameters.update_interval
+        
+        while self._process_active:
+            try:
+                # Only update if this is a dynamic object
+                if self.parameters.object_type == ObjectType.DYNAMIC:
+                    self._update_state(dt)
+                    
+            except Exception as e:
+                print(f"⚠️ SimulationObject '{self.parameters.name}' motion error: {e}")
+            
+            # Yield control with update interval
+            yield self.env.timeout(dt)
+    
+    def stop_motion_process(self):
+        """Stop the motion process"""
+        self._process_active = False
+        if self._motion_process:
+            try:
+                self._motion_process.interrupt()
+                self._motion_process = None
+                print(f"🛑 SimulationObject '{self.parameters.name}': Motion process stopped")
+            except Exception:
+                pass
+    
+    def _update_state(self, dt: float):
+        """Update object state with given time step"""
         # Check if connected to any STATIC objects - if so, cannot move
         if self._is_connected_to_static_object():
             return
-            
-        dt = self.parameters.update_interval
         
         # Update position (simple integration)
         linear_delta = self.velocity.linear * dt
@@ -240,7 +278,7 @@ class SimulationObject:
         # Update pose
         self.pose = Pose.from_position_rotation(new_position, new_rotation)
         
-        # Update all connected objects
+        # Update all connected objects (thread-safe)
         self._update_connected_objects()
     
     def _normalize_angle(self, angle: float) -> float:
@@ -281,7 +319,7 @@ class SimulationObject:
         return False
     
     def _update_connected_objects(self, updated_objects=None):
-        """Update all connected objects based on this object's new pose"""
+        """Update all connected objects based on this object's new pose (thread-safe)"""
         if updated_objects is None:
             updated_objects = set()
         
@@ -291,54 +329,59 @@ class SimulationObject:
         
         updated_objects.add(self)
         
-        for connected_obj in self.connected_objects:
-            if connected_obj in updated_objects:
-                continue
+        with self._connection_lock:
+            for connected_obj in self.connected_objects:
+                if connected_obj in updated_objects:
+                    continue
+                    
+                # Calculate new pose for connected object
+                relative_pose = self.relative_poses[connected_obj]
+                new_pose = relative_pose.transform_by(self.pose)
                 
-            # Calculate new pose for connected object
-            relative_pose = self.relative_poses[connected_obj]
-            new_pose = relative_pose.transform_by(self.pose)
-            
-            # Update connected object
-            connected_obj.pose = new_pose
-            
-            # Recursively update its other connections
-            connected_obj._update_connected_objects(updated_objects)
+                # Update connected object
+                connected_obj.pose = new_pose
+                
+                # Recursively update its other connections
+                connected_obj._update_connected_objects(updated_objects)
     
     def connect_to(self, other_object: 'SimulationObject', relative_pose: Optional[Pose] = None):
-        """Connect this object to another object with optional relative pose"""
+        """Connect this object to another object with optional relative pose (thread-safe)"""
         # Prevent self-connection
         if other_object is self:
             raise ValueError("Cannot connect object to itself")
         
-        # Skip if already connected
-        if other_object in self.connected_objects:
-            return
-        
-        # Calculate relative pose if not provided
-        if relative_pose is None:
-            relative_pose = other_object.pose.inverse_transform_by(self.pose)
-        else:
-            # Update other object's pose to maintain relative position
-            other_object.pose = relative_pose.transform_by(self.pose)
-        
-        # Add bidirectional connection
-        self.connected_objects.append(other_object)
-        self.relative_poses[other_object] = relative_pose
-        
-        other_object.connected_objects.append(self)
-        other_object.relative_poses[self] = self.pose.inverse_transform_by(other_object.pose)
+        with self._connection_lock:
+            with other_object._connection_lock:
+                # Skip if already connected
+                if other_object in self.connected_objects:
+                    return
+                
+                # Calculate relative pose if not provided
+                if relative_pose is None:
+                    relative_pose = other_object.pose.inverse_transform_by(self.pose)
+                else:
+                    # Update other object's pose to maintain relative position
+                    other_object.pose = relative_pose.transform_by(self.pose)
+                
+                # Add bidirectional connection
+                self.connected_objects.append(other_object)
+                self.relative_poses[other_object] = relative_pose
+                
+                other_object.connected_objects.append(self)
+                other_object.relative_poses[self] = self.pose.inverse_transform_by(other_object.pose)
     
     def disconnect_from(self, other_object: 'SimulationObject'):
-        """Disconnect from another object"""
-        if other_object in self.connected_objects:
-            self.connected_objects.remove(other_object)
-            del self.relative_poses[other_object]
-            
-            # Remove reverse connection
-            if self in other_object.connected_objects:
-                other_object.connected_objects.remove(self)
-                del other_object.relative_poses[self]
+        """Disconnect from another object (thread-safe)"""
+        with self._connection_lock:
+            with other_object._connection_lock:
+                if other_object in self.connected_objects:
+                    self.connected_objects.remove(other_object)
+                    del self.relative_poses[other_object]
+                    
+                    # Remove reverse connection
+                    if self in other_object.connected_objects:
+                        other_object.connected_objects.remove(self)
+                        del other_object.relative_poses[self]
     
     def disconnect_all(self):
         """Disconnect from all connected objects"""
