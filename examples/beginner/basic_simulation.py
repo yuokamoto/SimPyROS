@@ -6,13 +6,30 @@ This example demonstrates the simplified interface for robot simulation.
 From ~100 lines of setup code down to ~20 lines!
 
 Usage:
-    python basic_simulation.py
+    python basic_simulation.py [options]
+    
+Options:
+    --visualization, --vis       Enable PyVista visualization (default: False)
+    --real-time-factor, --rtf N  Set real-time speed multiplier (default: 1.0)
+    --example {simple,mobile,multi,performance,all}  Choose which example to run (default: all)
+    --num-robots N               Number of robots for performance demo (default: 10)
+    --frequency-grouping         Enable frequency grouping optimization for performance demo
+
+Examples:
+    python basic_simulation.py                           # Run all examples headless at 1x speed
+    python basic_simulation.py --vis                     # Run all examples with visualization
+    python basic_simulation.py --rtf 2.0                 # Run at 2x speed
+    python basic_simulation.py --example simple --vis    # Run only simple example with visualization
+    python basic_simulation.py --example mobile --rtf 0.5  # Run mobile example at half speed
+    python basic_simulation.py --example performance --num-robots 100  # 100 robots performance test
+    python basic_simulation.py --example performance --num-robots 50 --frequency-grouping --rtf 5.0  # 50 robots with optimization
 """
 
 import sys
 import os
 import math
 import time
+import argparse
 
 # Add parent directories to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -21,17 +38,25 @@ from core.simulation_manager import SimulationManager
 from core.simulation_object import Velocity, Pose
 
 
-def simple_control_example(unified_process=True):
-    """Example 1: Simple joint control with auto-close"""
+def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0):
+    """Example 1: Simple joint control with auto-close
+    
+    Args:
+        unified_process: Use unified event-driven process architecture
+        visualization: Enable PyVista visualization
+        real_time_factor: Real-time speed multiplier
+    """
     print("🤖 Simple Control Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
+    print(f"Visualization: {'ON' if visualization else 'OFF'}")
+    print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
-    # Explicitly set real-time factor to 1.0 for accurate timing
+    # Use parameters for configuration
     from core.simulation_manager import SimulationConfig
     config = SimulationConfig(
-        real_time_factor=1.0,  # Ensure 1:1 real-time synchronization
-        visualization=True,  # Fixed: Visualization should now work with callbacks
+        real_time_factor=real_time_factor,
+        visualization=visualization,
         enable_frequency_grouping=False  # Disable frequency grouping to test individual processes
     )
     sim = SimulationManager(config)
@@ -99,16 +124,25 @@ def simple_control_example(unified_process=True):
             pass
 
 
-def mobile_robot_example(unified_process=True):
-    """Example 2: Mobile robot with auto-close"""
+def mobile_robot_example(unified_process=True, visualization=False, real_time_factor=1.0):
+    """Example 2: Mobile robot with auto-close
+    
+    Args:
+        unified_process: Use unified event-driven process architecture
+        visualization: Enable PyVista visualization
+        real_time_factor: Real-time speed multiplier
+    """
     print("🚗 Mobile Robot Example")
+    print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
+    print(f"Visualization: {'ON' if visualization else 'OFF'}")
+    print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
-    # Explicitly set real-time factor to 1.0 for accurate timing
+    # Use parameters for configuration
     from core.simulation_manager import SimulationConfig
     config = SimulationConfig(
-        real_time_factor=1.0,  # Ensure 1:1 real-time synchronization
-        visualization=True,  # Fixed: Visualization should now work with callbacks
+        real_time_factor=real_time_factor,
+        visualization=visualization,
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -157,17 +191,25 @@ def mobile_robot_example(unified_process=True):
             pass
 
 
-def multi_robot_example(unified_process=True):
-    """Example 3: Multi-robot with auto-close"""
+def multi_robot_example(unified_process=True, visualization=False, real_time_factor=1.0):
+    """Example 3: Multi-robot with auto-close
+    
+    Args:
+        unified_process: Use unified event-driven process architecture
+        visualization: Enable PyVista visualization
+        real_time_factor: Real-time speed multiplier
+    """
     print("🤖🤖 Multi-Robot Example")  
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
+    print(f"Visualization: {'ON' if visualization else 'OFF'}")
+    print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
-    # Explicitly set real-time factor to 1.0 for accurate timing
+    # Use parameters for configuration
     from core.simulation_manager import SimulationConfig
     config = SimulationConfig(
-        real_time_factor=1.0,  # Ensure 1:1 real-time synchronization
-        visualization=True,  # Fixed: Visualization should now work with callbacks
+        real_time_factor=real_time_factor,
+        visualization=visualization,
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -230,11 +272,19 @@ def multi_robot_example(unified_process=True):
             pass
 
 
-def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, real_time_factor=1.0, visualization=True):
-    """Example 4: Multi robots performance test with automatic frequency grouping"""
+def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, real_time_factor=1.0, visualization=False):
+    """Example 4: Multi robots performance test with automatic frequency grouping
+    
+    Args:
+        num_robots: Number of robots to create (default: 10)
+        use_frequency_grouping: Enable frequency grouping optimization
+        real_time_factor: Real-time speed multiplier
+        visualization: Enable PyVista visualization
+    """
     print(f"🚀 {num_robots} Robots Performance Demo")
     print(f"Architecture: {'Auto Frequency-Grouped' if use_frequency_grouping else 'Traditional Individual Process'}")
     print(f"Visualization: {'ON' if visualization else 'OFF (Headless)'}")
+    print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
     from core.simulation_manager import SimulationManager, SimulationConfig
@@ -493,25 +543,64 @@ def headless_example():
 
 def main():
     """Run all examples with automatic progression"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
+    parser.add_argument('--visualization', '--vis', action='store_true', 
+                       help='Enable PyVista visualization (default: False)')
+    parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
+                       help='Real-time speed multiplier (default: 1.0)')
+    parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all',
+                       help='Which example to run (default: all)')
+    parser.add_argument('--num-robots', type=int, default=10,
+                       help='Number of robots for performance demo (default: 10)')
+    parser.add_argument('--frequency-grouping', action='store_true',
+                       help='Enable frequency grouping optimization for performance demo')
+    
+    args = parser.parse_args()
+    
     print("🚀 SimPyROS Event-Driven Architecture Examples")
     print("This demonstrates the new unified event-driven process architecture")
+    print(f"Visualization: {'ON' if args.visualization else 'OFF'}")
+    print(f"Real-time factor: {args.real_time_factor}x")
     print("=" * 60)
     
     # Configurable robot count for performance testing
     robot_count = 100  # Start with smaller number for testing
     
-    # Test both architectures for comparison
-    examples = [
-        ("Simple Robot", lambda: simple_control_example(unified_process=True)),
-        # ("Mobile Robot", lambda: mobile_robot_example(unified_process=True)),
-        # ("Multi-Robot", lambda: multi_robot_example(unified_process=True)),
-        # (f"{robot_count} Robots Demo", lambda: multi_robots_performance_demo(
-        #     num_robots=robot_count, 
-        #     use_frequency_grouping=False,  # Use working approach
-        #     real_time_factor=10.0,
-        #     visualization=True  
-        # ))
-    ]
+    # Use command line parameters
+    default_visualization = args.visualization
+    default_real_time_factor = args.real_time_factor
+    
+    # Define all available examples
+    all_examples = {
+        'simple': ("Simple Robot", lambda: simple_control_example(
+            unified_process=True, 
+            visualization=default_visualization,
+            real_time_factor=default_real_time_factor
+        )),
+        'mobile': ("Mobile Robot", lambda: mobile_robot_example(
+            unified_process=True,
+            visualization=default_visualization,
+            real_time_factor=default_real_time_factor
+        )),
+        'multi': ("Multi-Robot", lambda: multi_robot_example(
+            unified_process=True,
+            visualization=default_visualization,
+            real_time_factor=default_real_time_factor
+        )),
+        'performance': (f"{args.num_robots} Robots Performance Demo", lambda: multi_robots_performance_demo(
+            num_robots=args.num_robots,
+            use_frequency_grouping=args.frequency_grouping,
+            real_time_factor=default_real_time_factor,
+            visualization=default_visualization
+        )),
+    }
+    
+    # Select examples based on argument
+    if args.example == 'all':
+        examples = list(all_examples.values())
+    else:
+        examples = [all_examples[args.example]]
     
     for i, (name, func) in enumerate(examples):
         try:

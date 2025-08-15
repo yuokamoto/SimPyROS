@@ -30,6 +30,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core.robot import Robot, create_robot_from_urdf, RobotParameters
 from core.simulation_object import SimulationObject, ObjectParameters, Pose, Velocity
 from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visualizer
+from core.optimized_pyvista_visualizer import OptimizedURDFRobotVisualizer, create_optimized_urdf_visualizer
 from core.time_manager import TimeManager, set_global_time_manager
 
 
@@ -44,6 +45,11 @@ class SimulationConfig:
     real_time_factor: float = 1.0  # Real time multiplier (1.0 = real time, 0.5 = half speed, 2.0 = double speed, 0.0 = max speed)
     time_step: float = 0.01  # Simulation time step in seconds
     enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
+    
+    # PyVista optimization settings
+    use_optimized_visualizer: bool = True  # Use optimized PyVista visualizer
+    visualization_optimization_level: str = 'balanced'  # 'performance', 'balanced', 'quality'
+    enable_batch_rendering: bool = True  # Enable batch rendering for multiple robots
     
     
 class ControlCallback:
@@ -99,7 +105,7 @@ class SimulationManager:
         
         # Core components - use RealtimeEnvironment
         self.time_manager: Optional[TimeManager] = None
-        self.visualizer: Optional[URDFRobotVisualizer] = None
+        self.visualizer: Optional[Union[URDFRobotVisualizer, OptimizedURDFRobotVisualizer]] = None
         
         # Simulation state
         self.robots: Dict[str, Robot] = {}
@@ -167,13 +173,29 @@ class SimulationManager:
             return
             
         if self.visualizer is None:
-            self.visualizer = create_urdf_robot_visualizer(
-                interactive=True,
-                window_size=self.config.window_size
-            )
+            # Choose visualizer type based on configuration
+            if self.config.use_optimized_visualizer:
+                print(f"🚀 Creating optimized PyVista visualizer (level: {self.config.visualization_optimization_level})")
+                self.visualizer = create_optimized_urdf_visualizer(
+                    interactive=True,
+                    window_size=self.config.window_size,
+                    optimization_level=self.config.visualization_optimization_level
+                )
+            else:
+                print("📺 Creating standard PyVista visualizer")
+                self.visualizer = create_urdf_robot_visualizer(
+                    interactive=True,
+                    window_size=self.config.window_size
+                )
             
             if self.visualizer.available:
-                print("✅ Visualization system initialized")
+                visualizer_type = "Optimized" if self.config.use_optimized_visualizer else "Standard"
+                print(f"✅ {visualizer_type} visualization system initialized")
+                
+                # Print optimization info for optimized visualizer
+                if self.config.use_optimized_visualizer and hasattr(self.visualizer, 'get_performance_stats'):
+                    print(f"   Optimization level: {self.config.visualization_optimization_level}")
+                    print(f"   Batch rendering: {'Enabled' if self.config.enable_batch_rendering else 'Disabled'}")
             else:
                 warnings.warn("Visualization system not available, running headless")
                 self.config.visualization = False
@@ -379,7 +401,7 @@ class SimulationManager:
             yield self.env.timeout(callback_dt)
     
     def _visualization_process_loop(self):
-        """Visualization update process loop - SimPy pure environment"""
+        """Visualization update process loop - SimPy pure environment with optimization support"""
         if not self.visualizer or not self.visualizer.available:
             return
             
@@ -387,19 +409,46 @@ class SimulationManager:
         
         while self._running and not self._shutdown_requested:
             
-            # Update robot visualizations
-            for robot_name, robot in self.robots.items():
+            # Use batch rendering for optimized visualizer
+            if (self.config.use_optimized_visualizer and 
+                self.config.enable_batch_rendering and 
+                hasattr(self.visualizer, 'batch_mode') and 
+                len(self.robots) > 1):
+                
+                # Batch update all robots
                 try:
-                    self.visualizer.update_robot_visualization(robot_name)
+                    with self.visualizer.batch_mode():
+                        for robot_name, robot in self.robots.items():
+                            try:
+                                self.visualizer.update_robot_visualization(robot_name, force_render=False)
+                            except Exception as e:
+                                print(f"⚠️ Robot visualization update error for {robot_name}: {e}")
+                        
+                        # Update simulation objects in batch
+                        for object_name, obj in self.objects.items():
+                            try:
+                                self._update_object_visualization(object_name, obj)
+                            except Exception as e:
+                                print(f"⚠️ Object visualization update error for {object_name}: {e}")
+                    # Rendering happens automatically when exiting batch_mode context
+                    
                 except Exception as e:
-                    print(f"⚠️ Robot visualization update error for {robot_name}: {e}")
-            
-            # Update simulation object visualizations
-            for object_name, obj in self.objects.items():
-                try:
-                    self._update_object_visualization(object_name, obj)
-                except Exception as e:
-                    print(f"⚠️ Object visualization update error for {object_name}: {e}")
+                    print(f"⚠️ Batch visualization update error: {e}")
+                    
+            else:
+                # Standard individual updates
+                for robot_name, robot in self.robots.items():
+                    try:
+                        self.visualizer.update_robot_visualization(robot_name)
+                    except Exception as e:
+                        print(f"⚠️ Robot visualization update error for {robot_name}: {e}")
+                
+                # Update simulation object visualizations
+                for object_name, obj in self.objects.items():
+                    try:
+                        self._update_object_visualization(object_name, obj)
+                    except Exception as e:
+                        print(f"⚠️ Object visualization update error for {object_name}: {e}")
             
             # Yield control back to SimPy
             yield self.env.timeout(dt)
