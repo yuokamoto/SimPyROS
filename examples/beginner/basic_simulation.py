@@ -40,7 +40,6 @@ def simple_control_example(unified_process=True):
         robot = sim.add_robot_from_urdf(
             name="my_robot",
             urdf_path="examples/robots/articulated_arm_robot.urdf",
-            joint_update_rate=100.0,  # Set robot's internal update rate to match callback frequency
             unified_process=unified_process  # Use parameter from function call
         )
         
@@ -88,7 +87,7 @@ def simple_control_example(unified_process=True):
                 
                 sim.set_robot_joint_position("my_robot", joint_name, position)
         
-        sim.set_robot_control_callback("my_robot", my_control, frequency=100.0)
+        sim.set_robot_control_callback("my_robot", my_control, frequency=10.0)
         sim.run(duration=5.0, auto_close=True)
         
     except Exception as e:
@@ -118,8 +117,7 @@ def mobile_robot_example(unified_process=True):
         robot = sim.add_robot_from_urdf(
             name="mobile_robot", 
             urdf_path="examples/robots/mobile_robot.urdf",
-            joint_update_rate=10.0,  # Use working update rate
-            unified_process=unified_process  # Use parameter from function call
+                        unified_process=unified_process  # Use parameter from function call
         )
         
         # Debug: Mobile robot callback counter
@@ -175,8 +173,8 @@ def multi_robot_example(unified_process=True):
     sim = SimulationManager(config)
     
     try:
-        robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0), joint_update_rate=10.0, unified_process=False)
-        robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0), joint_update_rate=10.0, unified_process=False)
+        robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0), unified_process=False)
+        robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0), unified_process=False)
         
         # Debug: Multi robot callback counters
         robot1_callback_count = 0
@@ -232,7 +230,7 @@ def multi_robot_example(unified_process=True):
             pass
 
 
-def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=True, real_time_factor=1.0, visualization=False):
+def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, real_time_factor=1.0, visualization=True):
     """Example 4: Multi robots performance test with automatic frequency grouping"""
     print(f"🚀 {num_robots} Robots Performance Demo")
     print(f"Architecture: {'Auto Frequency-Grouped' if use_frequency_grouping else 'Traditional Individual Process'}")
@@ -270,15 +268,12 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=True, re
             # Use only one robot type for faster loading
             urdf_path = "examples/robots/mobile_robot.urdf"
             
-            # Assign different joint_update_rates - SimulationManager will auto-group by these
-            joint_update_rate = 10
-            
+            # Create robot without joint_update_rate parameter
             robot = sim.add_robot_from_urdf(
                 name=robot_name,
                 urdf_path=urdf_path,
                 initial_pose=Pose(x=x, y=y, z=0),
-                joint_update_rate=joint_update_rate,  # This determines the frequency group
-                unified_process=True  # Still supported, but frequency grouping is more efficient
+                unified_process=False  # Use independent processes for reliable callback execution
             )
             robots.append((robot_name, robot, i))
             
@@ -311,6 +306,10 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=True, re
                 
                 t = sim.get_sim_time()
                 
+                # Debug: Print for first few callbacks of first few robots
+                if robot_id < 3 and total_callbacks <= 5:
+                    print(f"🤖 Robot{robot_id} Callback #{total_callbacks}: t={t:.2f}s, dt={dt:.4f}s")
+                
                 # High-performance pattern selection using bit operations
                 pattern = (robot_id + int(t * 2.0)) & 7  # Dynamic pattern based on time
                 
@@ -335,9 +334,8 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=True, re
             # Create controller (frequency grouping handled automatically by SimulationManager)
             controller = create_auto_frequency_controller(robot_name, robot_id)
             
-            # SimulationManager automatically uses the robot's joint_update_rate for grouping
-            # The frequency parameter will be matched to joint_update_rate if different
-            robot_frequency = joint_update_rate
+            # Use standard frequency for all robots
+            robot_frequency = 10.0
             
             # Set callback - SimulationManager handles frequency grouping automatically
             sim.set_robot_control_callback(robot_name, controller, frequency=robot_frequency)
@@ -349,10 +347,10 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=True, re
             print("🔧 Traditional individual processes mode")
         
         # Run simulation
-        duration = 10.0
+        duration = 5.0  # Shorter duration for testing
         print(f"Running for {duration}s...")
         
-        sim.run(duration=duration)
+        sim.run(duration=duration, auto_close=True)
         
         # Calculate performance metrics
         elapsed_time = time.time() - start_time
@@ -500,26 +498,19 @@ def main():
     print("=" * 60)
     
     # Configurable robot count for performance testing
-    robot_count = 100  # 周波数グループ化のテストに適した台数
+    robot_count = 100  # Start with smaller number for testing
     
     # Test both architectures for comparison
     examples = [
-        ("Simple Robot", lambda: simple_control_example(unified_process=False)),
-        ("Mobile Robot", lambda: mobile_robot_example(unified_process=False)),
-        ("Multi-Robot", lambda: multi_robot_example(unified_process=False)),
-        # (f"{robot_count} Robots (Frequency-Grouped)", lambda: multi_robots_performance_demo(
+        ("Simple Robot", lambda: simple_control_example(unified_process=True)),
+        # ("Mobile Robot", lambda: mobile_robot_example(unified_process=True)),
+        # ("Multi-Robot", lambda: multi_robot_example(unified_process=True)),
+        # (f"{robot_count} Robots Demo", lambda: multi_robots_performance_demo(
         #     num_robots=robot_count, 
-        #     use_frequency_grouping=True,  # 周波数グループ化を有効化
-        #     real_time_factor=1.0,  # 最高速度でパフォーマンステスト
+        #     use_frequency_grouping=False,  # Use working approach
+        #     real_time_factor=10.0,
         #     visualization=True  
-        # )),
-        # (f"{robot_count} Robots (Traditional)", lambda: multi_robots_performance_demo(
-        #     num_robots=robot_count, 
-        #     use_frequency_grouping=False,  # 従来方式での比較
-        #     real_time_factor=0.0,  
-        #     visualization=True
-        # )),
-        # ("Headless Mode", headless_example)
+        # ))
     ]
     
     for i, (name, func) in enumerate(examples):

@@ -595,8 +595,7 @@ class SimulationManager:
                         # Update visualization at reasonable rate (not every simulation step)
                         try:
                             self.visualizer.plotter.update()
-                            # Small sleep to prevent excessive CPU usage
-                            time.sleep(0.01)  # 100 Hz max visualization update rate
+                            # No sleep - let RealtimeEnvironment handle timing
                         except:
                             # Window closed by user
                             break
@@ -631,6 +630,8 @@ class SimulationManager:
             print("\n🛑 Interrupted by user")
             self._shutdown_requested = True
         finally:
+            # Print timing statistics before shutdown
+            self._print_timing_stats()
             self.shutdown()
         
         return True
@@ -1186,6 +1187,45 @@ class SimulationManager:
             }
         
         return stats
+    
+    def get_sim_time(self) -> float:
+        """Get current simulation time"""
+        return self.time_manager.get_sim_time() if self.time_manager else 0.0
+    
+    def _print_timing_stats(self):
+        """Print detailed timing statistics"""
+        if not self.time_manager:
+            return
+            
+        try:
+            stats = self.time_manager.get_timing_stats()
+            
+            print(f"\n📊 Timing Performance Statistics:")
+            print(f"   Simulation time: {stats.sim_time:.2f}s")
+            print(f"   Real time elapsed: {stats.real_time_elapsed:.2f}s")
+            print(f"   Target factor: {stats.real_time_factor:.2f}x")
+            print(f"   Actual factor: {stats.actual_speed}")
+            
+            # Calculate error percentage
+            if stats.real_time_elapsed > 0 and stats.sim_time > 0:
+                actual_factor = stats.sim_time / stats.real_time_elapsed
+                error_percent = abs(actual_factor - stats.real_time_factor) / stats.real_time_factor * 100
+                
+                if error_percent < 5.0:
+                    status = "✅ EXCELLENT"
+                elif error_percent < 10.0:
+                    status = "✅ GOOD" 
+                elif error_percent < 20.0:
+                    status = "⚠️ FAIR"
+                else:
+                    status = "❌ POOR"
+                    
+                print(f"   Timing accuracy: {status} ({error_percent:.1f}% error)")
+            else:
+                print(f"   Timing accuracy: N/A (insufficient data)")
+                
+        except Exception as e:
+            print(f"⚠️ Could not get timing stats: {e}")
 
 
 # Convenience functions for common use cases

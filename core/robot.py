@@ -393,7 +393,7 @@ class Robot(SimulationObject):
     
     def _base_motion_process_loop(self) -> Generator:
         """Independent SimPy process for robot base motion"""
-        base_dt = 1.0 / 10.0   # 10 Hz for base motion, sufficient for smooth movement
+        base_dt = 1.0 / self.robot_parameters.joint_update_rate   # 10 Hz for base motion, sufficient for smooth movement
         
         while self._processes_active:
             try:
