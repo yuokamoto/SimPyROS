@@ -30,8 +30,9 @@ def simple_control_example(unified_process=True):
     # Explicitly set real-time factor to 1.0 for accurate timing
     from core.simulation_manager import SimulationConfig
     config = SimulationConfig(
-        real_time_factor=2,  # Ensure 1:1 real-time synchronization
-        visualization=True
+        real_time_factor=1.0,  # Ensure 1:1 real-time synchronization
+        visualization=True,  # Fixed: Visualization should now work with callbacks
+        enable_frequency_grouping=False  # Disable frequency grouping to test individual processes
     )
     sim = SimulationManager(config)
     
@@ -39,21 +40,56 @@ def simple_control_example(unified_process=True):
         robot = sim.add_robot_from_urdf(
             name="my_robot",
             urdf_path="examples/robots/articulated_arm_robot.urdf",
-            unified_process=unified_process
+            joint_update_rate=100.0,  # Set robot's internal update rate to match callback frequency
+            unified_process=unified_process  # Use parameter from function call
         )
         
+        # Debug: Print joint information first
+        print("🔍 Debug: Checking robot joints...")
+        joint_names = robot.get_joint_names()
+        print(f"📋 All joint names: {joint_names}")
+        
+        movable_joints = []
+        for name in joint_names:
+            joint = robot.joints[name]
+            joint_type = joint.joint_type.value if hasattr(joint.joint_type, 'value') else str(joint.joint_type)
+            print(f"  Joint '{name}': type={joint_type}")
+            if joint_type in ['revolute', 'prismatic', 'continuous']:
+                movable_joints.append(name)
+        
+        print(f"✅ Movable joints found: {movable_joints}")
+        
+        # Callback execution counter
+        callback_count = 0
+        
         def my_control(dt: float):
-            """Simple sinusoidal joint motion"""
-            t = sim.get_sim_time()  # Use simulation time instead of wall time for real-time factor control
-            joint_names = [name for name in robot.get_joint_names() 
-                          if robot.joints[name].joint_type.value != 'fixed']
+            """Simple sinusoidal joint motion with debug output"""
+            nonlocal callback_count
+            callback_count += 1
             
-            for i, joint_name in enumerate(joint_names):
-                position = 0.5 * math.sin(t + i * math.pi / 3)
+            t = sim.get_sim_time()
+            
+            # Print debug info for every callback in first 10 calls, then every 100 calls
+            if callback_count <= 10 or callback_count % 100 == 0:
+                print(f"🔄 Callback #{callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+                if callback_count <= 5:
+                    print(f"   Movable joints: {movable_joints}")
+            
+            # Apply sinusoidal motion to movable joints
+            for i, joint_name in enumerate(movable_joints):
+                amplitude = 0.8  # Larger amplitude for more visible motion
+                frequency = 0.5   # Slower frequency for smoother motion
+                phase = i * math.pi / 3  # Phase offset between joints
+                position = amplitude * math.sin(t * frequency + phase)
+                
+                # Debug: Print position for first joint in first few calls
+                if callback_count <= 5 and i == 0:
+                    print(f"   Setting joint '{joint_name}' to position {position:.3f}")
+                
                 sim.set_robot_joint_position("my_robot", joint_name, position)
         
-        sim.set_robot_control_callback("my_robot", my_control, frequency=20.0)
-        sim.run(duration=10.0, auto_close=True)
+        sim.set_robot_control_callback("my_robot", my_control, frequency=100.0)
+        sim.run(duration=5.0, auto_close=True)
         
     except Exception as e:
         print(f"⚠️ Example error: {e}")
@@ -73,7 +109,8 @@ def mobile_robot_example(unified_process=True):
     from core.simulation_manager import SimulationConfig
     config = SimulationConfig(
         real_time_factor=1.0,  # Ensure 1:1 real-time synchronization
-        visualization=True
+        visualization=True,  # Fixed: Visualization should now work with callbacks
+        enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
     
@@ -81,12 +118,26 @@ def mobile_robot_example(unified_process=True):
         robot = sim.add_robot_from_urdf(
             name="mobile_robot", 
             urdf_path="examples/robots/mobile_robot.urdf",
-            unified_process=unified_process
+            joint_update_rate=10.0,  # Use working update rate
+            unified_process=unified_process  # Use parameter from function call
         )
+        
+        # Debug: Mobile robot callback counter
+        mobile_callback_count = 0
         
         def mobile_control(dt: float):
             """Move robot in circle"""
+            nonlocal mobile_callback_count
+            mobile_callback_count += 1
+            
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
+            
+            # Print debug info for first 10 calls, then every 50 calls
+            if mobile_callback_count <= 10 or mobile_callback_count % 50 == 0:
+                print(f"🚗 Mobile Callback #{mobile_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+                if mobile_callback_count <= 3:
+                    print(f"   Setting velocity: linear_x=0.5, angular_z=0.3")
+            
             linear_speed = 0.5
             angular_speed = 0.3
             
@@ -96,7 +147,7 @@ def mobile_robot_example(unified_process=True):
             )
             sim.set_robot_velocity("mobile_robot", velocity)
         
-        sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=30.0)
+        sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=10.0)
         sim.run(duration=10.0, auto_close=True)
         
     except Exception as e:
@@ -118,17 +169,30 @@ def multi_robot_example(unified_process=True):
     from core.simulation_manager import SimulationConfig
     config = SimulationConfig(
         real_time_factor=1.0,  # Ensure 1:1 real-time synchronization
-        visualization=True
+        visualization=True,  # Fixed: Visualization should now work with callbacks
+        enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
     
     try:
-        robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0), unified_process=unified_process)
-        robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0), unified_process=unified_process)
+        robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0), joint_update_rate=10.0, unified_process=False)
+        robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0), joint_update_rate=10.0, unified_process=False)
+        
+        # Debug: Multi robot callback counters
+        robot1_callback_count = 0
+        robot2_callback_count = 0
         
         def control_robot1(dt):
             """Control first robot"""
+            nonlocal robot1_callback_count
+            robot1_callback_count += 1
+            
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
+            
+            # Print debug info for first few calls
+            if robot1_callback_count <= 5 or robot1_callback_count % 25 == 0:
+                print(f"🤖1 Robot1 Callback #{robot1_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+            
             joint_names = [name for name in robot1.get_joint_names() 
                           if robot1.joints[name].joint_type.value != 'fixed']
             
@@ -137,8 +201,16 @@ def multi_robot_example(unified_process=True):
                 sim.set_robot_joint_position("robot1", joint_name, position)
         
         def control_robot2(dt):
-            """Control second robot"""  
+            """Control second robot"""
+            nonlocal robot2_callback_count
+            robot2_callback_count += 1
+            
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
+            
+            # Print debug info for first few calls
+            if robot2_callback_count <= 5 or robot2_callback_count % 25 == 0:
+                print(f"🤖2 Robot2 Callback #{robot2_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+            
             joint_names = [name for name in robot2.get_joint_names() 
                           if robot2.joints[name].joint_type.value != 'fixed']
             
@@ -146,7 +218,7 @@ def multi_robot_example(unified_process=True):
                 position = 0.4 * math.cos(t * 1.5 + i * math.pi / 2)
                 sim.set_robot_joint_position("robot2", joint_name, position)
         
-        sim.set_robot_control_callback("robot1", control_robot1, frequency=15.0)
+        sim.set_robot_control_callback("robot1", control_robot1, frequency=10.0)
         sim.set_robot_control_callback("robot2", control_robot2, frequency=10.0)
         
         sim.run(duration=1.5, auto_close=True)
@@ -412,7 +484,7 @@ def headless_example():
             position = 0.2 * math.sin(t * 3 + i)
             sim.set_robot_joint_position("headless_robot", joint_name, position)
     
-    sim.set_robot_control_callback("headless_robot", headless_control, frequency=50.0)
+    sim.set_robot_control_callback("headless_robot", headless_control, frequency=10.0)
     sim.run(duration=5.0)
     
     # Print final statistics
@@ -432,15 +504,15 @@ def main():
     
     # Test both architectures for comparison
     examples = [
-        # ("Simple Robot", lambda: simple_control_example(unified_process=True)),
-        # ("Mobile Robot", lambda: mobile_robot_example(unified_process=True)),
-        # ("Multi-Robot", lambda: multi_robot_example(unified_process=True)),
-        (f"{robot_count} Robots (Frequency-Grouped)", lambda: multi_robots_performance_demo(
-            num_robots=robot_count, 
-            use_frequency_grouping=True,  # 周波数グループ化を有効化
-            real_time_factor=1.0,  # 最高速度でパフォーマンステスト
-            visualization=True  
-        )),
+        ("Simple Robot", lambda: simple_control_example(unified_process=False)),
+        ("Mobile Robot", lambda: mobile_robot_example(unified_process=False)),
+        ("Multi-Robot", lambda: multi_robot_example(unified_process=False)),
+        # (f"{robot_count} Robots (Frequency-Grouped)", lambda: multi_robots_performance_demo(
+        #     num_robots=robot_count, 
+        #     use_frequency_grouping=True,  # 周波数グループ化を有効化
+        #     real_time_factor=1.0,  # 最高速度でパフォーマンステスト
+        #     visualization=True  
+        # )),
         # (f"{robot_count} Robots (Traditional)", lambda: multi_robots_performance_demo(
         #     num_robots=robot_count, 
         #     use_frequency_grouping=False,  # 従来方式での比較

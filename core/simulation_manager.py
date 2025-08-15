@@ -584,16 +584,19 @@ class SimulationManager:
                         else:
                             # Run simulation step - let RealtimeEnvironment handle proper timing
                             try:
-                                # Small increment for responsive UI but let RealtimeEnvironment control timing
-                                target_time = min(self.env.now + 0.1, simulation_end_time or self.env.now + 0.1)
+                                # Much smaller increment to allow callbacks to execute properly
+                                step_size = 1.0 / self.config.update_rate  # Use update rate for step size
+                                target_time = min(self.env.now + step_size, simulation_end_time or self.env.now + step_size)
                                 self.env.run(until=target_time)
                             except simpy.core.EmptySchedule:
                                 # All processes finished
                                 break
                         
-                        # Always update visualization
+                        # Update visualization at reasonable rate (not every simulation step)
                         try:
                             self.visualizer.plotter.update()
+                            # Small sleep to prevent excessive CPU usage
+                            time.sleep(0.01)  # 100 Hz max visualization update rate
                         except:
                             # Window closed by user
                             break
