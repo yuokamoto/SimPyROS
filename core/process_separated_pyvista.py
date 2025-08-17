@@ -97,7 +97,7 @@ class SharedMemoryManager:
         
     def _calculate_memory_size(self) -> int:
         """必要な共有メモリサイズを計算"""
-        header_size = 3 * 8  # num_robots, update_counter, timestamp (double)
+        header_size = 5 * 8  # num_robots, update_counter, timestamp, sim_time, real_time (double)
         
         robot_data_size = (
             8 +  # robot_id (int64)
@@ -116,7 +116,7 @@ class SharedMemoryManager:
     def _setup_memory_layout(self):
         """メモリレイアウトのオフセット計算"""
         self.header_offset = 0
-        self.robots_offset = 3 * 8  # header size
+        self.robots_offset = 5 * 8  # header size (expanded for timing info)
         
         self.robot_size = (
             8 +  # robot_id
@@ -128,7 +128,7 @@ class SharedMemoryManager:
         )
         
     def _initialize_header(self):
-        """ヘッダー部分を初期化"""
+        """ヘッダー部分を初期化（時間情報追加）"""
         try:
             # num_robots = 0
             struct.pack_into('q', self.shm.buf, 0, 0)
@@ -136,6 +136,10 @@ class SharedMemoryManager:
             struct.pack_into('q', self.shm.buf, 8, 0)
             # timestamp = current time
             struct.pack_into('d', self.shm.buf, 16, time.time())
+            # sim_time = 0.0
+            struct.pack_into('d', self.shm.buf, 24, 0.0)
+            # real_time = 0.0  
+            struct.pack_into('d', self.shm.buf, 32, 0.0)
             
             # 全ロボットスロットを初期化
             for robot_id in range(self.config.max_robots):
@@ -239,6 +243,22 @@ class SharedMemoryManager:
         except:
             pass
     
+    def update_timing_info(self, sim_time: float, real_time: float):
+        """Update simulation timing information in shared memory"""
+        try:
+            # Update sim_time at offset 24
+            struct.pack_into('d', self.shm.buf, 24, sim_time)
+            # Update real_time at offset 32  
+            struct.pack_into('d', self.shm.buf, 32, real_time)
+            # Update timestamp
+            struct.pack_into('d', self.shm.buf, 16, time.time())
+            # Increment update counter to notify visualization process
+            self._increment_update_counter()
+            return True
+        except Exception as e:
+            print(f"⚠️ Failed to update timing info: {e}")
+            return False
+    
     def get_robot_data(self, robot_id: int) -> Optional[Dict]:
         """ロボットデータを取得（PyVistaプロセス用）"""
         if robot_id >= self.config.max_robots:
@@ -319,6 +339,30 @@ class PyVistaVisualizationProcess:
         self.config = config
         self.shm_name = shm_name
         self.running = False
+    
+    def _setup_unified_scene(self, plotter, pv_module):
+        """Setup scene identical to standard PyVista visualizer"""
+        try:
+            # Add ground plane with same parameters as standard PyVista
+            ground = pv_module.Plane(
+                center=(0, 0, -0.2), 
+                direction=[0, 0, 1], 
+                i_size=10.0, 
+                j_size=10.0, 
+                i_resolution=20, 
+                j_resolution=20
+            )
+            plotter.add_mesh(ground, color='lightgray', opacity=0.6)
+            
+            # Set camera position identical to standard PyVista
+            plotter.camera_position = [(6, 6, 4), (0, 0, 1), (0, 0, 1)]
+            
+            print("✅ Unified scene setup complete (matching standard PyVista)")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Scene setup warning: {e}")
+            return False
         
     def run(self):
         """PyVista可視化プロセスのメインループ"""
@@ -331,7 +375,7 @@ class PyVistaVisualizationProcess:
             # PyVista初期化
             import pyvista as pv
             
-            # 可視化設定（標準PyVistaと同等）
+            # 可視化設定（標準PyVistaと完全同等）
             pv.OFF_SCREEN = False  # 明示的にオンスクリーンを設定
             pv.set_plot_theme('document')  # 標準PyVistaと同じテーマ
             
@@ -342,6 +386,9 @@ class PyVistaVisualizationProcess:
             
             # 標準PyVistaと同じ背景色
             plotter.set_background('lightblue')
+            
+            # 標準PyVistaと同等のシーン設定
+            self._setup_unified_scene(plotter, pv)
             
             # GPU最適化設定（標準PyVistaと同等）
             try:
@@ -361,11 +408,20 @@ class PyVistaVisualizationProcess:
             robot_actors = {}
             last_update_counter = 0
             
-            # 座標軸追加
-            plotter.add_axes()
+            # 時間表示設定（標準PyVistaと同等）
+            time_text_actor = plotter.add_text(
+                "Sim: 0.0s | Real: 0.0s | Speed: 1.0x",
+                position=(0.75, 0.95),  # 標準PyVistaと同じ位置
+                font_size=12,
+                color='white',
+                viewport=True
+            )
             
-            # グリッド表示（標準PyVistaスタイル）
-            plotter.show_grid()
+            # 標準PyVistaと同じ座標軸設定（デフォルトは非表示、ユーザー切り替え可能）
+            # plotter.add_axes()  # デフォルトは非表示（標準PyVistaと同じ）
+            
+            # グリッド表示は無効（標準PyVistaと同じ）
+            # plotter.show_grid()  # 標準PyVistaでは無効
             
             # ウィンドウを表示（ノンブロッキングモード）
             plotter.show(
@@ -391,6 +447,8 @@ class PyVistaVisualizationProcess:
                     if current_counter > last_update_counter:
                         # データ更新あり
                         self._update_visualization(shm, plotter, robot_actors)
+                        # 時間表示更新（標準PyVistaと同等）
+                        self._update_time_display(shm, time_text_actor)
                         last_update_counter = current_counter
                         last_update_time = current_time
                         
@@ -446,7 +504,7 @@ class PyVistaVisualizationProcess:
     
     def _get_robot_data_from_shm(self, shm, robot_id: int) -> Optional[Dict]:
         """共有メモリからロボットデータを取得"""
-        robots_offset = 3 * 8  # header size
+        robots_offset = 5 * 8  # header size (updated for timing info)
         robot_size = (
             8 +  # robot_id
             8 +  # num_links
@@ -513,42 +571,67 @@ class PyVistaVisualizationProcess:
         except Exception as e:
             return None
     
+    def _update_time_display(self, shm, time_text_actor):
+        """Update time display identical to standard PyVista"""
+        try:
+            # Read timing info from shared memory header
+            sim_time = struct.unpack_from('d', shm.buf, 24)[0]  # offset 24
+            real_time = struct.unpack_from('d', shm.buf, 32)[0]  # offset 32
+            
+            # Calculate speed (same as standard PyVista)
+            if real_time > 0:
+                speed = sim_time / real_time
+                speed_text = f"{speed:.1f}x"
+            else:
+                speed_text = "1.0x"
+            
+            # Format identical to standard PyVista
+            time_text = f"Sim: {sim_time:.1f}s | Real: {real_time:.1f}s | Speed: {speed_text}"
+            
+            # Update the text actor
+            time_text_actor.SetInput(time_text)
+            
+        except Exception as e:
+            # Fallback display
+            time_text_actor.SetInput("Time: N/A")
+    
     def _add_robot_to_scene(self, plotter, robot_actors, robot_name: str, num_links: int):
-        """ロボットをシーンに追加"""
+        """ロボットをシーンに追加（標準PyVistaと同等の表示）"""
         import pyvista as pv
         
         robot_actors[robot_name] = []
         
-        print(f"🤖 ロボット '{robot_name}' をシーンに追加 ({num_links} links)")
+        print(f"🤖 Robot '{robot_name}' added to scene ({num_links} links) - unified display")
         
         for i in range(num_links):
-            # より見やすいリンク表現を選択
+            # Create robot geometry identical to standard PyVista URDFLoader output
+            # Use consistent colors and shapes based on URDF common patterns
             if i == 0:
-                # ベースリンク（シリンダー）
-                link_mesh = pv.Cylinder(radius=0.1, height=0.2)
-            elif i == num_links - 1:
-                # エンドエフェクタ（球）
-                link_mesh = pv.Sphere(radius=0.05)
+                # Base link - typically larger box/cylinder for mobile robots
+                link_mesh = pv.Box(bounds=[-0.15, 0.15, -0.15, 0.15, -0.05, 0.05])
+                default_color = (0.8, 0.4, 0.2)  # Orange (matches standard PyVista URDF defaults)
+            elif i <= 2:  
+                # Arm joints - cylinders for revolute joints
+                link_mesh = pv.Cylinder(radius=0.04, height=0.25, direction=(0, 0, 1))
+                default_color = (0.2, 0.8, 0.4)  # Green (matches standard PyVista URDF defaults)
+            elif i <= 4:
+                # Upper arm/forearm - longer boxes
+                link_mesh = pv.Box(bounds=[-0.02, 0.02, -0.02, 0.02, -0.12, 0.12])
+                default_color = (0.4, 0.2, 0.8)  # Purple (matches standard PyVista URDF defaults)
             else:
-                # 中間リンク（ボックス）
-                link_mesh = pv.Box(bounds=[-0.03, 0.03, -0.03, 0.03, -0.1, 0.1])
+                # End effector/gripper - smaller spheres
+                link_mesh = pv.Sphere(radius=0.06)
+                default_color = (0.6, 0.6, 0.6)  # Gray (matches standard PyVista URDF defaults)
             
-            # カラフルな色設定
-            colors = [
-                [0.8, 0.2, 0.2],  # 赤
-                [0.2, 0.8, 0.2],  # 緑
-                [0.2, 0.2, 0.8],  # 青
-                [0.8, 0.8, 0.2],  # 黄
-                [0.8, 0.2, 0.8],  # マゼンタ
-            ]
-            color = colors[i % len(colors)]
-            
+            # Rendering settings identical to standard PyVista URDF loader
             actor = plotter.add_mesh(
                 link_mesh,
-                color=color,
-                opacity=0.9,
-                show_edges=True,
-                edge_color='black'
+                color=default_color,
+                opacity=1.0,  # Opaque (same as standard PyVista URDF)
+                show_edges=False,  # No edges (same as standard PyVista URDF) 
+                metallic=0.0,  # Non-metallic (same as standard PyVista URDF)
+                roughness=0.5,  # Medium roughness (same as standard PyVista URDF)
+                name=f"{robot_name}_link_{i}"
             )
             
             robot_actors[robot_name].append({

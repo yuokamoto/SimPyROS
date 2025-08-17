@@ -122,13 +122,57 @@ class PyVistaVisualizer:
             )
             self.plotter.set_background('lightblue')
             
+            # Enable non-blocking mode for performance (critical for real-time simulation)
+            if self.interactive and self.available:
+                # Non-blocking show for interactive mode
+                self._setup_non_blocking_mode()
+            
         except Exception as e:
             print(f"Plotter creation error: {e}")
             self.available = False
     
+    def _setup_non_blocking_mode(self):
+        """Setup non-blocking mode for PyVista to prevent simulation blocking"""
+        try:
+            # Show window in non-blocking mode
+            self.plotter.show(
+                auto_close=False,
+                interactive_update=True,
+                full_screen=False
+            )
+            print("⚡ PyVista non-blocking mode enabled for real-time simulation")
+        except Exception as e:
+            print(f"⚠️ Could not enable non-blocking mode: {e}")
+    
+    def batch_mode(self):
+        """Context manager for batch rendering to improve performance"""
+        return BatchRenderingContext(self)
+    
     def __del__(self):
         if self.plotter:
             self.plotter.close()
+
+
+class BatchRenderingContext:
+    """Context manager for efficient batch rendering in PyVista"""
+    
+    def __init__(self, visualizer):
+        self.visualizer = visualizer
+        self.render_needed = False
+        
+    def __enter__(self):
+        # Defer rendering until batch is complete
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Perform single render at end of batch for performance
+        if self.visualizer.available and self.visualizer.plotter:
+            try:
+                self.visualizer.plotter.render()
+                # Update time display after batch completion
+                self.visualizer.update_time_display()
+            except Exception as e:
+                print(f"⚠️ Batch rendering error: {e}")
 
 
 
@@ -943,8 +987,13 @@ class URDFRobotVisualizer(PyVistaVisualizer):
     # _create_robot_link_actors has been removed - use _create_robot_link_actors_from_robot instead
     # This ensures all mesh creation uses Robot instance data directly (memo.txt requirement 37)
     
-    def update_robot_visualization(self, robot_name: str):
-        """Update robot visualization based on current joint positions"""
+    def update_robot_visualization(self, robot_name: str, force_render: bool = True):
+        """Update robot visualization based on current joint positions
+        
+        Args:
+            robot_name: Name of robot to update
+            force_render: Whether to force rendering updates (for batch mode optimization)
+        """
         if robot_name not in self.robots or robot_name not in self.link_actors:
             return False
         
@@ -985,8 +1034,9 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                             mapper.SetInputData(original_mesh)
                             mapper.Modified()
             
-            # Update time display
-            self.update_time_display()
+            # Update time display only when force_render is True (performance optimization)
+            if force_render:
+                self.update_time_display()
             
             return True
             

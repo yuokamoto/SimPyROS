@@ -59,3 +59,8 @@
 - ボタンの上にボタンの役割がわかるように文字を表示してください
 - ボタンやスライダー、sim timeなどの表示はスペースキーを押すことで表示のON/OFFができるようにしてください。
 - simulation全体のupdateのtime_stepを変更できるようにしてください。
+
+
+12.
+- realtime factor のtargetと実測
+- 

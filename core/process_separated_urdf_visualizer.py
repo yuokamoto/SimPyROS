@@ -14,7 +14,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from legacy.process_separated_pyvista import ProcessSeparatedPyVistaVisualizer, SharedMemoryConfig
+from core.process_separated_pyvista import ProcessSeparatedPyVistaVisualizer, SharedMemoryConfig
 from core.simulation_object import Pose
 
 
@@ -141,13 +141,42 @@ class ProcessSeparatedURDFRobotVisualizer(ProcessSeparatedPyVistaVisualizer):
                         # ローカルキャッシュ更新
                         self.robot_link_poses[robot_name] = link_poses
                         
+                    # 時間情報も更新（標準PyVistaと同等）
+                    self._update_timing_from_connected_managers()
+                        
                     return success
             
+            # 時間情報更新（標準PyVistaと同等）
+            self._update_timing_from_connected_managers()
             return True
             
         except Exception as e:
             print(f"⚠️ Error updating robot visualization '{robot_name}': {e}")
             return False
+    
+    def _update_timing_from_connected_managers(self):
+        """Update timing information from connected time/simulation managers"""
+        try:
+            sim_time = 0.0
+            real_time = 0.0
+            
+            # Priority 1: Get time from connected time manager
+            if self.time_manager:
+                stats = self.time_manager.get_timing_stats()
+                sim_time = stats.sim_time
+                real_time = stats.real_time_elapsed
+            # Priority 2: Get time from connected simulation manager (legacy)
+            elif self.simulation_manager:
+                sim_time = self.simulation_manager.get_sim_time()
+                real_time = self.simulation_manager.get_real_time()
+            
+            # Update shared memory with timing info
+            if hasattr(self, 'shared_memory_manager') and self.shared_memory_manager:
+                self.shared_memory_manager.update_timing_info(sim_time, real_time)
+            
+        except Exception as e:
+            # Silent fail for timing updates
+            pass
     
     def update_robot_pose(self, robot_name: str, pose: Pose) -> bool:
         """

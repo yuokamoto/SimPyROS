@@ -10,7 +10,7 @@ Usage:
     
 Options:
     --visualization, --vis       Enable visualization (default: False)
-    --visualization-backend      Visualization backend: pyvista, meshcat, optimized_pyvista, process_separated_pyvista (default: pyvista)
+    --visualization-backend      Visualization backend: pyvista, meshcat, process_separated_pyvista (default: process_separated_pyvista)
     --real-time-factor, --rtf N  Set real-time speed multiplier (default: 1.0)
     --example {simple,mobile,multi,performance,all}  Choose which example to run (default: all)
     --num-robots N               Number of robots for performance demo (default: 10)
@@ -20,9 +20,9 @@ Examples:
     python basic_simulation.py                           # Run all examples headless at 1x speed
     python basic_simulation.py --vis                     # Run all examples with PyVista visualization
     python basic_simulation.py --vis --visualization-backend meshcat  # Run with MeshCat web visualization
-    python basic_simulation.py --vis --visualization-backend process_separated_pyvista  # Process-separated PyVista
+    python basic_simulation.py --vis --visualization-backend pyvista  # Standard PyVista
     python basic_simulation.py --rtf 2.0                 # Run at 2x speed
-    python basic_simulation.py --example simple --vis --visualization-backend optimized_pyvista  # Optimized PyVista
+    python basic_simulation.py --example simple --vis    # Default process-separated PyVista
     python basic_simulation.py --example mobile --rtf 0.5  # Run mobile example at half speed
     python basic_simulation.py --example performance --num-robots 100  # 100 robots performance test
     python basic_simulation.py --example performance --num-robots 50 --frequency-grouping --rtf 5.0  # 50 robots with optimization
@@ -44,11 +44,14 @@ from core.simulation_object import Velocity, Pose
 def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0):
     """Example 1: Simple joint control with auto-close
     
+    This example demonstrates basic robot joint control using the simplified SimulationManager interface.
+    The robot will perform smooth sinusoidal motion on all available movable joints.
+    
     Args:
         unified_process: Use unified event-driven process architecture
         visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
-        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
+        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
     """
     print("🤖 Simple Control Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
@@ -62,6 +65,7 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
+        update_rate=30.0,  # Optimized update rate for better real-time performance
         enable_frequency_grouping=False  # Disable frequency grouping to test individual processes
     )
     sim = SimulationManager(config)
@@ -70,52 +74,66 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         robot = sim.add_robot_from_urdf(
             name="my_robot",
             urdf_path="examples/robots/articulated_arm_robot.urdf",
-            unified_process=unified_process  # Use parameter from function call
+            unified_process=True  # Use parameter from function call
         )
         
-        # Debug: Print joint information first
-        print("🔍 Debug: Checking robot joints...")
+        # Analyze robot joint configuration
+        print("🔍 Analyzing robot joints...")
         joint_names = robot.get_joint_names()
-        print(f"📋 All joint names: {joint_names}")
+        print(f"📋 Total joints: {len(joint_names)}")
         
         movable_joints = []
         for name in joint_names:
             joint = robot.joints[name]
             joint_type = joint.joint_type.value if hasattr(joint.joint_type, 'value') else str(joint.joint_type)
-            print(f"  Joint '{name}': type={joint_type}")
             if joint_type in ['revolute', 'prismatic', 'continuous']:
                 movable_joints.append(name)
+                print(f"  ✅ {name}: {joint_type} (movable)")
+            else:
+                print(f"  ⚪ {name}: {joint_type} (fixed)")
         
-        print(f"✅ Movable joints found: {movable_joints}")
+        print(f"🎯 Found {len(movable_joints)} movable joints: {movable_joints}")
+        
+        if not movable_joints:
+            print("ℹ️  No movable joints found - robot will remain stationary")
+            print("    This is normal for simple demonstration robots")
         
         # Callback execution counter
         callback_count = 0
         
         def my_control(dt: float):
-            """Simple sinusoidal joint motion with debug output"""
+            """Simple sinusoidal joint motion with intelligent feedback"""
             nonlocal callback_count
             callback_count += 1
             
             t = sim.get_sim_time()
             
-            # Print debug info for every callback in first 10 calls, then every 100 calls
-            if callback_count <= 10 or callback_count % 100 == 0:
-                print(f"🔄 Callback #{callback_count}: t={t:.2f}s, dt={dt:.4f}s")
-                if callback_count <= 5:
-                    print(f"   Movable joints: {movable_joints}")
+            # Adaptive debug output
+            show_debug = (callback_count <= 10 or 
+                         callback_count % 100 == 0 or
+                         (callback_count <= 50 and callback_count % 10 == 0))
             
-            # Apply sinusoidal motion to movable joints
-            for i, joint_name in enumerate(movable_joints):
-                amplitude = 0.8  # Larger amplitude for more visible motion
-                frequency = 0.5   # Slower frequency for smoother motion
-                phase = i * math.pi / 3  # Phase offset between joints
-                position = amplitude * math.sin(t * frequency + phase)
-                
-                # Debug: Print position for first joint in first few calls
-                if callback_count <= 5 and i == 0:
-                    print(f"   Setting joint '{joint_name}' to position {position:.3f}")
-                
-                sim.set_robot_joint_position("my_robot", joint_name, position)
+            if show_debug:
+                real_time = sim.get_real_time() if hasattr(sim, 'get_real_time') else 0
+                print(f"🔄 Control #{callback_count}: sim_t={t:.2f}s, real_t={real_time:.2f}s, dt={dt:.4f}s")
+            
+            # Apply smooth sinusoidal motion to all movable joints
+            if movable_joints:
+                for i, joint_name in enumerate(movable_joints):
+                    amplitude = 0.8  # Larger amplitude for visibility
+                    frequency = 0.5  # Smooth motion frequency
+                    phase = i * math.pi / 3  # Phase offset between joints
+                    position = amplitude * math.sin(t * frequency + phase)
+                    
+                    # Debug output for first joint only
+                    if show_debug and i == 0:
+                        print(f"   Joint '{joint_name}': {position:.3f} rad ({math.degrees(position):.1f}°)")
+                    
+                    sim.set_robot_joint_position("my_robot", joint_name, position)
+            else:
+                # No movable joints - just track timing
+                if show_debug:
+                    print(f"   No joint motion (robot has no movable joints)")
         
         sim.set_robot_control_callback("my_robot", my_control, frequency=10.0)
         sim.run(duration=duration, auto_close=True)
@@ -136,7 +154,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
         unified_process: Use unified event-driven process architecture
         visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
-        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
+        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
     """
     print("🚗 Mobile Robot Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
@@ -150,6 +168,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
+        update_rate=30.0,  # Optimized update rate for better real-time performance
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -205,7 +224,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         unified_process: Use unified event-driven process architecture
         visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
-        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
+        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
     """
     print("🤖🤖 Multi-Robot Example")  
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
@@ -219,6 +238,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
+        update_rate=30.0,  # Optimized update rate for better real-time performance
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -289,7 +309,7 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, r
         use_frequency_grouping: Enable frequency grouping optimization
         real_time_factor: Real-time speed multiplier
         visualization: Enable visualization
-        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
+        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
     """
     print(f"🚀 {num_robots} Robots Performance Demo")
     print(f"Architecture: {'Auto Frequency-Grouped' if use_frequency_grouping else 'Traditional Individual Process'}")
@@ -557,7 +577,7 @@ def main():
     parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
     parser.add_argument('--visualization', '--vis', action='store_true', 
                        help='Enable visualization (default: False)')
-    parser.add_argument('--visualization-backend', choices=['pyvista', 'meshcat', 'optimized_pyvista', 'process_separated_pyvista'], default='pyvista',
+    parser.add_argument('--visualization-backend', choices=['pyvista', 'meshcat', 'process_separated_pyvista'], default='process_separated_pyvista',
                        help='Visualization backend (default: pyvista)')
     parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
                        help='Real-time speed multiplier (default: 1.0)')

@@ -298,8 +298,8 @@ python examples/beginner/basic_simulation.py --vis --visualization-backend proce
 # MeshCat web-based (lightweight, browser-based)
 python examples/beginner/basic_simulation.py --vis --visualization-backend meshcat
 
-# Optimized PyVista (performance-focused)
-python examples/beginner/basic_simulation.py --vis --visualization-backend optimized_pyvista
+# Process-separated PyVista (default, crash-isolated)
+python examples/beginner/basic_simulation.py --vis
 ```
 
 ## 🚀 What's Next?

@@ -33,8 +33,7 @@ from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visua
 # Removed unused import: from core.unified_pyvista_visualizer import UnifiedPyVistaVisualizer, create_unified_visualizer
 from core.meshcat_visualizer import MeshCatURDFRobotVisualizer, create_meshcat_visualizer
 from core.time_manager import TimeManager, set_global_time_manager
-from legacy.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
-from legacy.optimized_pyvista_visualizer import create_optimized_urdf_visualizer
+from core.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
 
 
 @dataclass
@@ -50,7 +49,7 @@ class SimulationConfig:
     enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
     
     # Visualization backend settings
-    visualization_backend: str = 'pyvista'  # 'pyvista', 'meshcat', 'optimized_pyvista', 'process_separated_pyvista'
+    visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'meshcat', 'process_separated_pyvista'
     use_optimized_visualizer: bool = False  # Use optimized PyVista visualizer (deprecated, use visualization_backend)
     visualization_optimization_level: str = 'balanced'  # 'performance', 'balanced', 'quality'
     enable_batch_rendering: bool = True  # Enable batch rendering for multiple robots
@@ -190,7 +189,8 @@ class SimulationManager:
             
             # Handle legacy configuration (use_optimized_visualizer)
             if hasattr(self.config, 'use_optimized_visualizer') and self.config.use_optimized_visualizer and backend == 'pyvista':
-                backend = 'optimized_pyvista'
+                warnings.warn("optimized_pyvista backend is deprecated. Using process_separated_pyvista instead.", DeprecationWarning)
+                backend = 'process_separated_pyvista'
             
             print(f"🎯 Initializing visualization backend: {backend}")
             
@@ -210,11 +210,11 @@ class SimulationManager:
                     )
                     
                 elif backend == 'optimized_pyvista':
-                    print(f"🚀 Creating optimized PyVista visualizer (level: {self.config.visualization_optimization_level})")
-                    self.visualizer = create_optimized_urdf_visualizer(
-                        interactive=True,
-                        window_size=self.config.window_size,
-                        optimization_level=self.config.visualization_optimization_level
+                    warnings.warn("optimized_pyvista backend is deprecated. Using process_separated_pyvista instead.", DeprecationWarning)
+                    print(f"⚡ Creating process-separated PyVista visualizer (optimized_pyvista deprecated)")
+                    self.visualizer = create_process_separated_urdf_visualizer(
+                        max_robots=self.config.max_robots,
+                        max_links_per_robot=self.config.max_links_per_robot
                     )
                     
                 elif backend == 'pyvista':
@@ -249,16 +249,8 @@ class SimulationManager:
                         print(f"   🛡️ Crash isolation: PyVista crashes don't affect simulation")
                         print(f"   🚀 Non-blocking updates: SimPy performance maintained")
                         
-                    elif backend in ['optimized_pyvista', 'pyvista']:
-                        # Print optimization info for PyVista visualizers
-                        if hasattr(self.visualizer, 'get_performance_stats'):
-                            print(f"   Optimization level: {self.config.visualization_optimization_level}")
-                            print(f"   Batch rendering: {'Enabled' if self.config.enable_batch_rendering else 'Disabled'}")
-                            
-                        if backend == 'optimized_pyvista':
-                            print(f"   🚀 Performance optimizations enabled")
-                        else:
-                            print(f"   📺 Standard PyVista rendering")
+                    elif backend == 'pyvista':
+                        print(f"   📺 Standard PyVista rendering")
                 else:
                     warnings.warn(f"{backend} visualization system not available, running headless")
                     self.config.visualization = False

@@ -45,10 +45,9 @@ yield env.timeout(time_step)  # Only one yield in entire system
 - **sim_time based updates** replacing process-based loops
 
 #### 4. Visualization Systems
+- **Process-separated PyVista** (`legacy/process_separated_urdf_visualizer.py`) - Crash isolation (default)
 - **PyVistaVisualizer** (`core/pyvista_visualizer.py`) - Standard 3D visualization
 - **MeshCatVisualizer** (`core/meshcat_visualizer.py`) - Web-based visualization
-- **Process-separated PyVista** (`legacy/process_separated_urdf_visualizer.py`) - Crash isolation
-- **Optimized PyVista** (`legacy/optimized_pyvista_visualizer.py`) - Performance focused
 
 #### 5. Simulation Objects (`core/simulation_object.py`)
 - **Base classes** for all simulated entities
@@ -86,10 +85,6 @@ yield env.timeout(time_step)  # Only one yield in entire system
 - **Lightweight** with good performance
 - **Remote access** capabilities
 
-### Optimized PyVista (`optimized_pyvista`)
-- **Performance-focused** with GPU optimizations
-- **Batch rendering** for multiple objects
-- **Advanced optimization settings**
 
 ## Directory Structure
 
@@ -111,7 +106,7 @@ SimPyROS/
 │   └── advanced/                 # Complete demonstrations
 ├── legacy/                        # Previous implementations
 │   ├── process_separated_*.py    # Process-separated systems
-│   ├── optimized_pyvista_*.py   # Performance optimizations
+│   ├── process_separated_*.py  # Process isolation backends
 │   └── unified/                  # Legacy unified backends
 └── docs/                         # Documentation
 ```
