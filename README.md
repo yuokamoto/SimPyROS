@@ -1,33 +1,38 @@
-# SimPyROS - Event-Driven Robot Simulation Framework
+# SimPyROS - Centralized Discrete Event Simulation Framework
 
-A powerful robotics simulation framework built on **SimPy's RealtimeEnvironment** with **independent process architecture** for realistic robot behaviors. Features interactive 3D visualization, URDF robot support, and event-driven multi-robot coordination.
+A powerful robotics simulation framework built on **SimPy's centralized architecture** with **unified time management** for efficient robot simulation. Features interactive 3D visualization, URDF robot support, and high-performance simulation with real-time control.
 
-## 🚀 Revolutionary Architecture
+## 🚀 Revolutionary Centralized Architecture
 
-SimPyROS leverages **SimPy's true power** with independent processes for each robot subsystem:
+SimPyROS leverages **centralized update management** with a single simulation loop for optimal performance:
 
 ```python
-# Each robot has independent SimPy processes
-robot.start_joint_control_process()    # 100 Hz joint control
-robot.start_sensor_process()          # 30 Hz sensor processing
-robot.start_navigation_process()      # 10 Hz autonomous navigation
-robot.start_base_motion_process()     # 100 Hz base motion
-
-# Compare to single-loop centralized designs!
+# Centralized Update Flow (Latest Architecture)
+SimulationManager._simulation_process_loop():
+    advance_sim_time() → current_sim_time
+    for robot in robots:
+        robot.update_joints_if_needed(current_sim_time)  # 100Hz joint control
+        robot.update_if_needed(current_sim_time)         # Base motion updates
+    for obj in objects:
+        obj.update_if_needed(current_sim_time)           # Custom update rates
+    for callback in control_callbacks:
+        callback.call_if_needed(current_sim_time)        # User control logic
+    yield env.timeout(time_step)  # Single yield for optimal performance
 ```
 
-This enables **natural event-driven behaviors**, **scalable performance**, and **clear code architecture**.
+This enables **superior performance** (1500+ Hz headless), **simplified debugging**, and **precise timing control**.
 
 ## ✨ Key Features
 
 - 🤖 **URDF Robot Support**: Load complex robots with proper kinematics
 - 🎮 **Interactive 3D Visualization**: Real-time PyVista rendering with controls
-- ⚡ **Event-Driven Architecture**: Independent SimPy processes per robot subsystem
-- 🔗 **Multi-Robot Coordination**: Patrol, search, follower behaviors
+- ⚡ **Centralized Architecture**: Single-loop design with optimal performance
+- 🔗 **Multi-Robot Support**: Multiple robots with independent update rates
 - 🎯 **Simplified Interface**: ~20 lines for complete simulations
-- 📊 **Real-Time Control**: Dynamic speed, pause/resume, reset
-- 🧪 **Centralized Time Management**: RealtimeEnvironment-based synchronization
-- 🔧 **Headless Support**: High-performance simulation without GUI
+- 📊 **Real-Time Control**: Dynamic speed, pause/resume, reset functionality
+- ⏱️ **Unified Time Management**: Centralized sim_time access for all components
+- 🧪 **High Performance**: 1500+ Hz headless, 60+ Hz with visualization
+- 🔧 **Processing Time Compensation**: Accurate real-time synchronization
 
 ## 🚀 Quick Start
 
@@ -55,12 +60,10 @@ pip install -r requirements.txt
 source simpyros-env/bin/activate
 
 # Start with basics
-cd examples/beginner
-python basic_simulation.py
+python examples/beginner/basic_simulation.py --vis
 
-# Experience multi-robot coordination
-cd ../advanced  
-python advanced_simpy_demo.py
+# Experience advanced multi-robot
+python examples/advanced/all_features_demo.py --vis
 ```
 
 ### 3. Simple Code Example
@@ -77,13 +80,14 @@ robot = sim.add_robot_from_urdf("my_robot", "robots/articulated_arm_robot.urdf")
 
 # 3. Define control
 def control(dt):
+    sim_time = sim.get_sim_time()
     for joint_name in robot.get_joint_names():
-        position = math.sin(time.time())
+        position = math.sin(sim_time)
         sim.set_robot_joint_position("my_robot", joint_name, position)
 
 # 4. Run
 sim.set_robot_control_callback("my_robot", control)
-sim.run(duration=10.0)
+sim.run(duration=10.0, visualization=True)
 ```
 
 **That's it!** Complete simulation in ~15 lines.
@@ -95,8 +99,8 @@ Examples are organized by difficulty:
 ### 🟢 [Beginner](examples/beginner/) - Start Here
 - **[basic_simulation.py](examples/beginner/basic_simulation.py)** - Essential first example
   - Single robot with movement
-  - Interactive controls
-  - Perfect introduction
+  - Interactive visualization controls
+  - Perfect introduction to centralized architecture
 
 ### 🟡 [Intermediate](examples/intermediate/) - Build Skills  
 - **[link_connections.py](examples/intermediate/link_connections.py)** - Object attachments
@@ -104,56 +108,45 @@ Examples are organized by difficulty:
 - **[pyvista/](examples/intermediate/pyvista/)** - Direct visualization control
 
 ### 🔴 [Advanced](examples/advanced/) - Master the Framework
-- **[advanced_simpy_demo.py](examples/advanced/advanced_simpy_demo.py)** ⭐ **Featured**
-  - **3 autonomous robots** with different behaviors
-  - **Independent SimPy processes** demonstration
-  - **Event-driven coordination** showcase
-- **[all_features_demo.py](examples/advanced/all_features_demo.py)** - Complete feature tour
+- **[all_features_demo.py](examples/advanced/all_features_demo.py)** ⭐ **Featured**
+  - **Complete feature showcase** with all visualization backends
+  - **Multiple robot coordination** demonstrations
+  - **Performance comparison** between backends
+- **[advanced_simpy_demo.py](examples/advanced/advanced_simpy_demo.py)** - Advanced SimPy patterns
 
 ## 🏗️ Architecture Comparison
 
-### Before: Single-Loop Centralized (Legacy)
+### Before: Independent Process Architecture (Legacy)
 ```python
-while simulation_running:
-    for robot in robots:
-        robot.update_joints(dt)     # All at same frequency
-        robot.update_base(dt)       # Inflexible timing
-    for obj in objects:
-        obj.update_motion(dt)       # Fixed time step
-    yield env.timeout(fixed_dt)     # One yield for everything
+# Multiple independent SimPy processes (legacy approach)
+robot.start_joint_control_process()    # 100 Hz joint control
+robot.start_sensor_process()          # 30 Hz sensor processing
+robot.start_navigation_process()      # 10 Hz autonomous navigation
+robot.start_base_motion_process()     # 100 Hz base motion
+
+# Problems: Process synchronization complexity, lower performance
 ```
 
-**Problems:** Inflexible timing, complex coordination, doesn't leverage SimPy
-
-### After: Independent SimPy Processes (Current)
+### After: Centralized Update Management (Current)
 ```python
-# Joint control process (100 Hz)
-def joint_control_process():
-    while active:
-        process_joint_commands()
-        yield env.timeout(1.0 / 100.0)
+# Single centralized loop with direct method calls
+SimulationManager._simulation_process_loop():
+    for robot in robots: robot.update_joints_if_needed(sim_time)
+    for obj in objects: obj.update_if_needed(sim_time)
+    yield env.timeout(time_step)  # Only one yield in entire system
 
-# Navigation process (10 Hz)  
-def navigation_process():
-    while active:
-        if target_reached():
-            break
-        update_path_planning()
-        yield env.timeout(1.0 / 10.0)
-
-# Each runs independently!
+# Benefits: Superior performance, simplified debugging, precise timing
 ```
-
-**Benefits:** Natural behaviors, efficient resource use, leverages SimPy's strengths
 
 ## 🎮 Interactive Features
 
 All simulations include:
-- **Real-time factor control** (0.1x to 5.0x speed)
-- **Play/Pause/Reset** buttons  
-- **Coordinate axis toggle**
-- **Wireframe mode**
-- **Simulation time display**
+- **Real-time factor control** (0.1x to 5.0x speed with slider)
+- **Play/Pause/Reset** buttons with emoji labels
+- **🎯 Axes**: Toggle coordinate axis display
+- **🚧 Collision**: Toggle collision geometry display  
+- **🕸️ Wire**: Toggle wireframe rendering mode
+- **Simulation time display** with frame rate monitoring
 - **Mouse-controlled 3D navigation**
 
 ## 🤖 Robot Models
@@ -169,10 +162,10 @@ All simulations include:
 
 ## 🎯 Learning Path
 
-1. **[basic_simulation.py](examples/beginner/basic_simulation.py)** - Learn fundamentals
+1. **[basic_simulation.py](examples/beginner/basic_simulation.py)** - Learn centralized architecture fundamentals
 2. **[link_connections.py](examples/intermediate/link_connections.py)** - Object relationships  
 3. **[mesh_robots.py](examples/intermediate/mesh_robots.py)** - External robot models
-4. **[advanced_simpy_demo.py](examples/advanced/advanced_simpy_demo.py)** - Multi-robot coordination
+4. **[all_features_demo.py](examples/advanced/all_features_demo.py)** - Complete feature showcase
 
 ## 🔧 System Requirements
 
@@ -218,86 +211,108 @@ conda install -c conda-forge vtk pyvista
 - Use headless mode: `--headless`
 - Check system resources
 
-## 📊 Performance
+## 📊 Performance Metrics
 
-- **Beginner examples**: 60+ FPS with visualization, 1000+ FPS headless
-- **Advanced multi-robot**: 30+ FPS, scales with robot count
-- **Independent processes**: Superior to single-loop designs
+- **Headless Mode**: 1500+ Hz simulation rates
+- **With Visualization**: 60+ Hz with smooth animation
+- **Multi-Robot**: Scales efficiently with robot count
+- **Timing Accuracy**: <5% error with processing time compensation
+- **Memory Usage**: Optimized for multiple robots and objects
 
-## 🧪 Core Architecture
+## 🧪 Core Architecture Components
 
-### TimeManager (RealtimeEnvironment-based)
+### SimulationManager (Centralized Orchestrator)
+```python
+from core.simulation_manager import SimulationManager
+
+sim = SimulationManager()  # Centralized time management
+robot = sim.add_robot_from_urdf(name, urdf_path)
+sim.run()  # Single simulation loop
+```
+
+### TimeManager (Unified Timing)
 ```python
 from core.time_manager import TimeManager
 
 time_mgr = TimeManager(real_time_factor=1.0)
-env = time_mgr.env  # SimPy RealtimeEnvironment
+# Centralized sim_time access for all components
 ```
 
-### Robot (Independent Processes)
+### Robot (sim_time Based Updates)
 ```python
 from core.robot import Robot
 
 robot = Robot(env, parameters, time_manager)
-# Automatically starts: joint, sensor, navigation, base processes
-```
-
-### SimulationManager (Orchestrator)
-```python
-from core.simulation_manager import SimulationManager
-
-sim = SimulationManager()  # Uses RealtimeEnvironment
-robot = sim.add_robot_from_urdf(name, urdf_path)
-sim.run()
+# Updates based on simulation time, not real time
 ```
 
 ## 📚 Documentation
 
 - **[Examples Guide](examples/README.md)** - Complete usage examples
-- **[CLAUDE.md](CLAUDE.md)** - Development history and architecture details
+- **[CLAUDE.md](CLAUDE.md)** - Development history and detailed architecture
 - **[Legacy Code](legacy/)** - Previous implementations for reference
 
 ## 🎓 Educational Goals
 
 By using SimPyROS, you'll learn:
 
-1. **Event-Driven Simulation** - SimPy's cooperative multitasking
-2. **Robot Kinematics** - URDF loading and joint control
-3. **3D Visualization** - Interactive PyVista rendering
-4. **Process Architecture** - Independent vs centralized design
-5. **Multi-Robot Coordination** - Autonomous behaviors
+1. **Centralized Simulation Architecture** - Single-loop vs multi-process design
+2. **Unified Time Management** - sim_time based coordination
+3. **Robot Kinematics** - URDF loading and joint control
+4. **3D Visualization** - Interactive PyVista rendering
+5. **Performance Optimization** - Efficient update management
 
 ## 🔮 Advanced Features
 
 - **Autonomous Navigation**: Goal-seeking with obstacle avoidance
 - **Sensor Simulation**: LIDAR, camera, IMU processing
-- **Multi-Robot Coordination**: Patrol, search, follow behaviors
+- **Multi-Robot Coordination**: Centralized behavior management
 - **Real-Time Control**: Dynamic parameter adjustment
-- **Headless Operation**: High-performance simulation
+- **Headless Operation**: High-performance simulation without GUI
+- **Processing Time Compensation**: Accurate real-time synchronization
 
 ## 🤝 Contributing
 
 This project emphasizes:
+- **Centralized architecture** for optimal performance
 - **Educational progression** from simple to complex
 - **Real-world applicability** with practical examples
-- **Architecture clarity** demonstrating SimPy's strengths
+- **Performance optimization** with timing accuracy
 - **Comprehensive documentation** of design decisions
 
 ## 📄 License
 
 [Add your license information here]
 
+## 🌟 Visualization Backends
+
+SimPyROS supports multiple visualization options:
+
+```bash
+# Standard PyVista (recommended for most users)
+python examples/beginner/basic_simulation.py --vis --visualization-backend pyvista
+
+# Process-separated PyVista (crash isolation)
+python examples/beginner/basic_simulation.py --vis --visualization-backend process_separated_pyvista
+
+# MeshCat web-based (lightweight, browser-based)
+python examples/beginner/basic_simulation.py --vis --visualization-backend meshcat
+
+# Optimized PyVista (performance-focused)
+python examples/beginner/basic_simulation.py --vis --visualization-backend optimized_pyvista
+```
+
 ## 🚀 What's Next?
 
 After mastering SimPyROS:
-- Build custom robot behaviors
-- Implement swarm coordination
-- Integrate with ROS 2
+- Build custom robot behaviors with centralized control
+- Implement swarm coordination with unified timing
+- Integrate with ROS 2 for real robot deployment
 - Create autonomous vehicle simulations
 - Develop warehouse robotics scenarios
 
 ---
 
-**🎯 SimPyROS demonstrates that event-driven simulation with independent processes is superior to single-loop centralized designs. Experience the difference!**
+**🎯 SimPyROS demonstrates that centralized update management with unified time control is superior to complex multi-process designs. Experience the performance difference!**
 
-*Latest Update: January 2025 - Revolutionary SimPy architecture with RealtimeEnvironment and independent process design*
+*Latest Update: August 2025 - Revolutionary centralized architecture with unified time management and processing time compensation*

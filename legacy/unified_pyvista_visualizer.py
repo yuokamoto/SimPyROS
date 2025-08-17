@@ -10,7 +10,14 @@ import threading
 from typing import Dict, List, Optional, Callable, Any
 
 from .pyvista_visualizer import PyVistaVisualizer, SceneBuilder
-from .base_simulation_manager import BaseSimulationManager, SimulationBackend
+# Legacy classes replaced with modern architecture
+class SimulationBackend:
+    SIMPLE_WHILE_LOOP = "simple_while_loop"
+    SIMPY_FREQUENCY_GROUP = "simpy_frequency_group"  
+    SIMPY_PURE = "simpy_pure"
+
+class BaseSimulationManager:
+    pass
 from .simulation_object import Velocity, Pose
 
 try:

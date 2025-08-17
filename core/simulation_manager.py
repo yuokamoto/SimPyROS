@@ -30,8 +30,11 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core.robot import Robot, create_robot_from_urdf, RobotParameters
 from core.simulation_object import SimulationObject, ObjectParameters, Pose, Velocity
 from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visualizer
-from core.optimized_pyvista_visualizer import OptimizedURDFRobotVisualizer, create_optimized_urdf_visualizer
+# Removed unused import: from core.unified_pyvista_visualizer import UnifiedPyVistaVisualizer, create_unified_visualizer
+from core.meshcat_visualizer import MeshCatURDFRobotVisualizer, create_meshcat_visualizer
 from core.time_manager import TimeManager, set_global_time_manager
+from legacy.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
+from legacy.optimized_pyvista_visualizer import create_optimized_urdf_visualizer
 
 
 @dataclass
@@ -46,10 +49,19 @@ class SimulationConfig:
     time_step: float = 0.01  # Simulation time step in seconds
     enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
     
-    # PyVista optimization settings
-    use_optimized_visualizer: bool = True  # Use optimized PyVista visualizer
+    # Visualization backend settings
+    visualization_backend: str = 'pyvista'  # 'pyvista', 'meshcat', 'optimized_pyvista', 'process_separated_pyvista'
+    use_optimized_visualizer: bool = False  # Use optimized PyVista visualizer (deprecated, use visualization_backend)
     visualization_optimization_level: str = 'balanced'  # 'performance', 'balanced', 'quality'
     enable_batch_rendering: bool = True  # Enable batch rendering for multiple robots
+    
+    # MeshCat-specific settings
+    meshcat_port: int = 7000  # Port for MeshCat server
+    meshcat_open_browser: bool = True  # Open browser automatically for MeshCat
+    
+    # Process-separated PyVista settings
+    max_robots: int = 5  # Maximum number of robots for shared memory (デフォルト値を小さく)
+    max_links_per_robot: int = 15  # Maximum links per robot for shared memory
     
     
 class ControlCallback:
@@ -105,7 +117,7 @@ class SimulationManager:
         
         # Core components - use RealtimeEnvironment
         self.time_manager: Optional[TimeManager] = None
-        self.visualizer: Optional[Union[URDFRobotVisualizer, OptimizedURDFRobotVisualizer]] = None
+        self.visualizer: Optional[Union[URDFRobotVisualizer, OptimizedURDFRobotVisualizer, MeshCatURDFRobotVisualizer, ProcessSeparatedURDFRobotVisualizer]] = None
         
         # Simulation state
         self.robots: Dict[str, Robot] = {}
@@ -173,31 +185,87 @@ class SimulationManager:
             return
             
         if self.visualizer is None:
-            # Choose visualizer type based on configuration
-            if self.config.use_optimized_visualizer:
-                print(f"🚀 Creating optimized PyVista visualizer (level: {self.config.visualization_optimization_level})")
-                self.visualizer = create_optimized_urdf_visualizer(
-                    interactive=True,
-                    window_size=self.config.window_size,
-                    optimization_level=self.config.visualization_optimization_level
-                )
-            else:
-                print("📺 Creating standard PyVista visualizer")
-                self.visualizer = create_urdf_robot_visualizer(
-                    interactive=True,
-                    window_size=self.config.window_size
-                )
+            # Choose visualizer backend based on configuration
+            backend = self.config.visualization_backend.lower()
             
-            if self.visualizer.available:
-                visualizer_type = "Optimized" if self.config.use_optimized_visualizer else "Standard"
-                print(f"✅ {visualizer_type} visualization system initialized")
+            # Handle legacy configuration (use_optimized_visualizer)
+            if hasattr(self.config, 'use_optimized_visualizer') and self.config.use_optimized_visualizer and backend == 'pyvista':
+                backend = 'optimized_pyvista'
+            
+            print(f"🎯 Initializing visualization backend: {backend}")
+            
+            try:
+                if backend == 'meshcat':
+                    print(f"🌐 Creating MeshCat visualizer (port: {self.config.meshcat_port})")
+                    self.visualizer = create_meshcat_visualizer(
+                        port=self.config.meshcat_port,
+                        open_browser=self.config.meshcat_open_browser
+                    )
+                    
+                elif backend == 'process_separated_pyvista':
+                    print(f"⚡ Creating process-separated PyVista visualizer")
+                    self.visualizer = create_process_separated_urdf_visualizer(
+                        max_robots=self.config.max_robots,
+                        max_links_per_robot=self.config.max_links_per_robot
+                    )
+                    
+                elif backend == 'optimized_pyvista':
+                    print(f"🚀 Creating optimized PyVista visualizer (level: {self.config.visualization_optimization_level})")
+                    self.visualizer = create_optimized_urdf_visualizer(
+                        interactive=True,
+                        window_size=self.config.window_size,
+                        optimization_level=self.config.visualization_optimization_level
+                    )
+                    
+                elif backend == 'pyvista':
+                    print("📺 Creating standard PyVista visualizer")
+                    self.visualizer = create_urdf_robot_visualizer(
+                        interactive=True,
+                        window_size=self.config.window_size
+                    )
+                    
+                else:
+                    raise ValueError(f"Unknown visualization backend: {backend}")
                 
-                # Print optimization info for optimized visualizer
-                if self.config.use_optimized_visualizer and hasattr(self.visualizer, 'get_performance_stats'):
-                    print(f"   Optimization level: {self.config.visualization_optimization_level}")
-                    print(f"   Batch rendering: {'Enabled' if self.config.enable_batch_rendering else 'Disabled'}")
-            else:
-                warnings.warn("Visualization system not available, running headless")
+                # Connect time manager and simulation manager to visualizer
+                if hasattr(self.visualizer, 'connect_time_manager') and self.time_manager:
+                    self.visualizer.connect_time_manager(self.time_manager)
+                    
+                if hasattr(self.visualizer, 'connect_simulation_manager'):
+                    self.visualizer.connect_simulation_manager(self)
+                
+                # Check availability and setup
+                if self.visualizer.available:
+                    print(f"✅ {backend} visualization system initialized")
+                    
+                    # Print backend-specific info
+                    if backend == 'meshcat':
+                        print(f"   🌐 MeshCat server: http://127.0.0.1:{self.config.meshcat_port}/static/")
+                        print(f"   📱 Web-based interface with mesh support")
+                        
+                    elif backend == 'process_separated_pyvista':
+                        print(f"   ⚡ Process separation: ENABLED")
+                        print(f"   📊 Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")
+                        print(f"   🛡️ Crash isolation: PyVista crashes don't affect simulation")
+                        print(f"   🚀 Non-blocking updates: SimPy performance maintained")
+                        
+                    elif backend in ['optimized_pyvista', 'pyvista']:
+                        # Print optimization info for PyVista visualizers
+                        if hasattr(self.visualizer, 'get_performance_stats'):
+                            print(f"   Optimization level: {self.config.visualization_optimization_level}")
+                            print(f"   Batch rendering: {'Enabled' if self.config.enable_batch_rendering else 'Disabled'}")
+                            
+                        if backend == 'optimized_pyvista':
+                            print(f"   🚀 Performance optimizations enabled")
+                        else:
+                            print(f"   📺 Standard PyVista rendering")
+                else:
+                    warnings.warn(f"{backend} visualization system not available, running headless")
+                    self.config.visualization = False
+                    
+            except Exception as e:
+                print(f"❌ Failed to initialize {backend} visualizer: {e}")
+                warnings.warn(f"Visualization backend '{backend}' failed, running headless")
                 self.config.visualization = False
     
     def add_robot_from_urdf(self, 
@@ -592,66 +660,68 @@ class SimulationManager:
         
         try:
             if self.config.visualization and self.visualizer and self.visualizer.available:
-                # Visualization mode: start window first, then run simulation with real-time updates
-                try:
-                    # Start PyVista window in non-blocking mode
-                    self.visualizer.plotter.show(
-                        auto_close=False, 
-                        interactive_update=True
-                    )
-                    
-                    # Run simulation with real-time visualization updates
-                    simulation_end_time = None
-                    if duration:
-                        # Set end time
-                        simulation_end_time = self.env.now + duration
-                        if auto_close:
-                            print(f"🕐 Simulation will run for {duration}s, then auto-close")
-                        else:
-                            print(f"🕐 Simulation will run for {duration}s, but window stays open")
-                    
-                    while not self._shutdown_requested:
-                        # Check if simulation time has ended
-                        if simulation_end_time and self.env.now >= simulation_end_time:
-                            # Simulation finished
-                            if not hasattr(self, '_simulation_ended'):
-                                print(f"\n⏰ Simulation time ({duration}s) completed")
-                                self._simulation_ended = True
-                                # Stop the simulation processes
-                                self._running = False  # This will stop simulation callbacks
-                                
-                                if auto_close:
-                                    # Auto-close mode: gracefully end visualization
-                                    print("🔄 Auto-closing for next example...")
-                                    self._shutdown_requested = True
-                                    # Give a moment for the message to display
-                                    time.sleep(0.1)
-                                    break
-                                else:
-                                    # Manual mode: keep visualization running
-                                    print("💡 Visualization continues - close window or press Ctrl+C to exit")
-                        else:
-                            # Run simulation step - let RealtimeEnvironment handle proper timing
-                            try:
-                                # Much smaller increment to allow callbacks to execute properly
-                                step_size = 1.0 / self.config.update_rate  # Use update rate for step size
-                                target_time = min(self.env.now + step_size, simulation_end_time or self.env.now + step_size)
-                                self.env.run(until=target_time)
-                            except simpy.core.EmptySchedule:
-                                # All processes finished
-                                break
+                # Check if this is a process-separated visualizer
+                is_process_separated = hasattr(self.visualizer, '_run_visualization_process')
+                
+                # Set up simulation duration
+                simulation_end_time = None
+                if duration:
+                    simulation_end_time = self.env.now + duration
+                    if auto_close:
+                        print(f"🕐 Simulation will run for {duration}s, then auto-close")
+                    else:
+                        print(f"🕐 Simulation will run for {duration}s, but window stays open")
+                
+                if not is_process_separated:
+                    # Standard visualizers (PyVista with plotter)
+                    try:
+                        # Start PyVista window in non-blocking mode
+                        self.visualizer.plotter.show(
+                            auto_close=False, 
+                            interactive_update=True
+                        )
                         
-                        # Update visualization at reasonable rate (not every simulation step)
-                        try:
-                            self.visualizer.plotter.update()
-                            # No sleep - let RealtimeEnvironment handle timing
-                        except:
-                            # Window closed by user
-                            break
-                                
-                except KeyboardInterrupt:
-                    print("\n🛑 Visualization interrupted")
-                    self._shutdown_requested = True
+                        # Visualization loop for standard visualizers
+                        while not self._shutdown_requested:
+                            # Check if simulation time has ended
+                            if simulation_end_time and self.env.now >= simulation_end_time:
+                                self._handle_simulation_end(duration, auto_close)
+                                break
+                            else:
+                                # Run simulation step
+                                if not self._run_simulation_step(simulation_end_time):
+                                    break
+                            
+                            # Update visualization
+                            try:
+                                self.visualizer.plotter.update()
+                            except:
+                                # Window closed by user
+                                break
+                    
+                    except Exception as e:
+                        print(f"⚠️ Visualization error: {e}")
+                        # Fall back to headless mode
+                        is_process_separated = True
+                
+                if is_process_separated:
+                    # Process-separated or headless mode
+                    print(f"⚡ Running with process-separated visualization")
+                    
+                    try:
+                        while not self._shutdown_requested:
+                            # Check if simulation time has ended
+                            if simulation_end_time and self.env.now >= simulation_end_time:
+                                self._handle_simulation_end(duration, auto_close)
+                                break
+                            else:
+                                # Run simulation step
+                                if not self._run_simulation_step(simulation_end_time):
+                                    break
+                                    
+                    except KeyboardInterrupt:
+                        print("\n🛑 Visualization interrupted")
+                        self._shutdown_requested = True
             else:
                 # Headless mode: let RealtimeEnvironment handle timing properly
                 if duration:
@@ -684,6 +754,34 @@ class SimulationManager:
             self.shutdown()
         
         return True
+    
+    def _handle_simulation_end(self, duration: float, auto_close: bool):
+        """Handle simulation end for both visualization modes"""
+        if not hasattr(self, '_simulation_ended'):
+            print(f"\n⏰ Simulation time ({duration}s) completed")
+            self._simulation_ended = True
+            self._running = False  # Stop simulation callbacks
+            
+            if auto_close:
+                print("🔄 Auto-closing for next example...")
+                self._shutdown_requested = True
+                time.sleep(0.1)
+            else:
+                print("💡 Visualization continues - close window or press Ctrl+C to exit")
+    
+    def _run_simulation_step(self, simulation_end_time: Optional[float]) -> bool:
+        """Run a single simulation step, returns False if simulation should end"""
+        try:
+            step_size = 1.0 / self.config.update_rate
+            target_time = min(
+                self.env.now + step_size, 
+                simulation_end_time or self.env.now + step_size
+            )
+            self.env.run(until=target_time)
+            return True
+        except simpy.core.EmptySchedule:
+            # All processes finished
+            return False
     
     def set_realtime_factor(self, factor: float):
         """
@@ -872,7 +970,12 @@ class SimulationManager:
         # Clean up visualization safely
         if self.visualizer:
             try:
-                if hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
+                # Check if this is a process-separated visualizer
+                if hasattr(self.visualizer, 'shutdown'):
+                    # Process-separated visualizer has its own shutdown method
+                    self.visualizer.shutdown()
+                elif hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
+                    # Standard PyVista visualizer
                     self.visualizer.plotter.close()
                     self.visualizer.plotter = None
             except Exception as e:

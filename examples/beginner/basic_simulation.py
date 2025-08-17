@@ -9,7 +9,8 @@ Usage:
     python basic_simulation.py [options]
     
 Options:
-    --visualization, --vis       Enable PyVista visualization (default: False)
+    --visualization, --vis       Enable visualization (default: False)
+    --visualization-backend      Visualization backend: pyvista, meshcat, optimized_pyvista, process_separated_pyvista (default: pyvista)
     --real-time-factor, --rtf N  Set real-time speed multiplier (default: 1.0)
     --example {simple,mobile,multi,performance,all}  Choose which example to run (default: all)
     --num-robots N               Number of robots for performance demo (default: 10)
@@ -17,9 +18,11 @@ Options:
 
 Examples:
     python basic_simulation.py                           # Run all examples headless at 1x speed
-    python basic_simulation.py --vis                     # Run all examples with visualization
+    python basic_simulation.py --vis                     # Run all examples with PyVista visualization
+    python basic_simulation.py --vis --visualization-backend meshcat  # Run with MeshCat web visualization
+    python basic_simulation.py --vis --visualization-backend process_separated_pyvista  # Process-separated PyVista
     python basic_simulation.py --rtf 2.0                 # Run at 2x speed
-    python basic_simulation.py --example simple --vis    # Run only simple example with visualization
+    python basic_simulation.py --example simple --vis --visualization-backend optimized_pyvista  # Optimized PyVista
     python basic_simulation.py --example mobile --rtf 0.5  # Run mobile example at half speed
     python basic_simulation.py --example performance --num-robots 100  # 100 robots performance test
     python basic_simulation.py --example performance --num-robots 50 --frequency-grouping --rtf 5.0  # 50 robots with optimization
@@ -38,17 +41,18 @@ from core.simulation_manager import SimulationManager
 from core.simulation_object import Velocity, Pose
 
 
-def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0):
+def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0):
     """Example 1: Simple joint control with auto-close
     
     Args:
         unified_process: Use unified event-driven process architecture
-        visualization: Enable PyVista visualization
+        visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
+        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
     """
     print("🤖 Simple Control Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
-    print(f"Visualization: {'ON' if visualization else 'OFF'}")
+    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF'}")
     print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
@@ -57,6 +61,7 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
     config = SimulationConfig(
         real_time_factor=real_time_factor,
         visualization=visualization,
+        visualization_backend=visualization_backend,
         enable_frequency_grouping=False  # Disable frequency grouping to test individual processes
     )
     sim = SimulationManager(config)
@@ -113,7 +118,7 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
                 sim.set_robot_joint_position("my_robot", joint_name, position)
         
         sim.set_robot_control_callback("my_robot", my_control, frequency=10.0)
-        sim.run(duration=5.0, auto_close=True)
+        sim.run(duration=duration, auto_close=True)
         
     except Exception as e:
         print(f"⚠️ Example error: {e}")
@@ -124,17 +129,18 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
             pass
 
 
-def mobile_robot_example(unified_process=True, visualization=False, real_time_factor=1.0):
+def mobile_robot_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=10.0):
     """Example 2: Mobile robot with auto-close
     
     Args:
         unified_process: Use unified event-driven process architecture
-        visualization: Enable PyVista visualization
+        visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
+        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
     """
     print("🚗 Mobile Robot Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
-    print(f"Visualization: {'ON' if visualization else 'OFF'}")
+    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF'}")
     print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
@@ -143,6 +149,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
     config = SimulationConfig(
         real_time_factor=real_time_factor,
         visualization=visualization,
+        visualization_backend=visualization_backend,
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -180,7 +187,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
             sim.set_robot_velocity("mobile_robot", velocity)
         
         sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=10.0)
-        sim.run(duration=10.0, auto_close=True)
+        sim.run(duration=duration, auto_close=True)
         
     except Exception as e:
         print(f"⚠️ Example error: {e}")
@@ -191,17 +198,18 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
             pass
 
 
-def multi_robot_example(unified_process=True, visualization=False, real_time_factor=1.0):
+def multi_robot_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=1.5):
     """Example 3: Multi-robot with auto-close
     
     Args:
         unified_process: Use unified event-driven process architecture
-        visualization: Enable PyVista visualization
+        visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
+        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
     """
     print("🤖🤖 Multi-Robot Example")  
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
-    print(f"Visualization: {'ON' if visualization else 'OFF'}")
+    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF'}")
     print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
@@ -210,6 +218,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
     config = SimulationConfig(
         real_time_factor=real_time_factor,
         visualization=visualization,
+        visualization_backend=visualization_backend,
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -261,7 +270,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         sim.set_robot_control_callback("robot1", control_robot1, frequency=10.0)
         sim.set_robot_control_callback("robot2", control_robot2, frequency=10.0)
         
-        sim.run(duration=1.5, auto_close=True)
+        sim.run(duration=duration, auto_close=True)
         
     except Exception as e:
         print(f"⚠️ Example error: {e}")
@@ -272,18 +281,19 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
             pass
 
 
-def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, real_time_factor=1.0, visualization=False):
+def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, real_time_factor=1.0, visualization=False, visualization_backend='pyvista', duration=5.0):
     """Example 4: Multi robots performance test with automatic frequency grouping
     
     Args:
         num_robots: Number of robots to create (default: 10)
         use_frequency_grouping: Enable frequency grouping optimization
         real_time_factor: Real-time speed multiplier
-        visualization: Enable PyVista visualization
+        visualization: Enable visualization
+        visualization_backend: Visualization backend (pyvista, meshcat, optimized_pyvista)
     """
     print(f"🚀 {num_robots} Robots Performance Demo")
     print(f"Architecture: {'Auto Frequency-Grouped' if use_frequency_grouping else 'Traditional Individual Process'}")
-    print(f"Visualization: {'ON' if visualization else 'OFF (Headless)'}")
+    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF (Headless)'}")
     print(f"Real-time factor: {real_time_factor}x")
     print("=" * 40)
     
@@ -293,6 +303,7 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, r
     # Create configuration with automatic frequency grouping
     config = SimulationConfig(
         visualization=visualization,
+        visualization_backend=visualization_backend,
         update_rate=10.0,     # Higher update rate for better performance
         real_time_factor=real_time_factor,
         enable_frequency_grouping=use_frequency_grouping  # Auto frequency grouping
@@ -397,7 +408,6 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, r
             print("🔧 Traditional individual processes mode")
         
         # Run simulation
-        duration = 5.0  # Shorter duration for testing
         print(f"Running for {duration}s...")
         
         sim.run(duration=duration, auto_close=True)
@@ -546,7 +556,9 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
     parser.add_argument('--visualization', '--vis', action='store_true', 
-                       help='Enable PyVista visualization (default: False)')
+                       help='Enable visualization (default: False)')
+    parser.add_argument('--visualization-backend', choices=['pyvista', 'meshcat', 'optimized_pyvista', 'process_separated_pyvista'], default='pyvista',
+                       help='Visualization backend (default: pyvista)')
     parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
                        help='Real-time speed multiplier (default: 1.0)')
     parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all',
@@ -555,12 +567,14 @@ def main():
                        help='Number of robots for performance demo (default: 10)')
     parser.add_argument('--frequency-grouping', action='store_true',
                        help='Enable frequency grouping optimization for performance demo')
+    parser.add_argument('--duration', type=float, default=5.0,
+                       help='Simulation duration in seconds (default: 5.0)')
     
     args = parser.parse_args()
     
     print("🚀 SimPyROS Event-Driven Architecture Examples")
     print("This demonstrates the new unified event-driven process architecture")
-    print(f"Visualization: {'ON' if args.visualization else 'OFF'}")
+    print(f"Visualization: {'ON (' + args.visualization_backend + ')' if args.visualization else 'OFF'}")
     print(f"Real-time factor: {args.real_time_factor}x")
     print("=" * 60)
     
@@ -570,29 +584,38 @@ def main():
     # Use command line parameters
     default_visualization = args.visualization
     default_real_time_factor = args.real_time_factor
+    default_visualization_backend = args.visualization_backend
     
     # Define all available examples
     all_examples = {
         'simple': ("Simple Robot", lambda: simple_control_example(
             unified_process=True, 
             visualization=default_visualization,
-            real_time_factor=default_real_time_factor
+            real_time_factor=default_real_time_factor,
+            visualization_backend=default_visualization_backend,
+            duration=args.duration
         )),
         'mobile': ("Mobile Robot", lambda: mobile_robot_example(
             unified_process=True,
             visualization=default_visualization,
-            real_time_factor=default_real_time_factor
+            real_time_factor=default_real_time_factor,
+            visualization_backend=default_visualization_backend,
+            duration=args.duration
         )),
         'multi': ("Multi-Robot", lambda: multi_robot_example(
             unified_process=True,
             visualization=default_visualization,
-            real_time_factor=default_real_time_factor
+            real_time_factor=default_real_time_factor,
+            visualization_backend=default_visualization_backend,
+            duration=args.duration
         )),
         'performance': (f"{args.num_robots} Robots Performance Demo", lambda: multi_robots_performance_demo(
             num_robots=args.num_robots,
             use_frequency_grouping=args.frequency_grouping,
             real_time_factor=default_real_time_factor,
-            visualization=default_visualization
+            visualization=default_visualization,
+            visualization_backend=default_visualization_backend,
+            duration=args.duration
         )),
     }
     
