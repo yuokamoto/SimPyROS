@@ -489,6 +489,10 @@ class SimulationManager:
             # Get current simulation time from time manager
             current_sim_time = self.time_manager.get_sim_time()
             
+            # Periodic speed limit enforcement
+            if self.time_manager:
+                self.time_manager.check_and_enforce_speed_limit()
+            
             # Process control callbacks
             for robot_name, callback in self.control_callbacks.items():
                 if callback.should_call(current_sim_time):
@@ -558,12 +562,21 @@ class SimulationManager:
             # Yield control back to SimPy
             yield self.env.timeout(dt)
     
-    def _duration_monitor(self, duration: float):
+    def _duration_monitor(self, duration: float, duration_mode: str = 'sim_time'):
         """Monitor simulation duration and close visualization when time expires"""
-        # For RealtimeEnvironment, we want to wait for simulation time duration
-        # The RealtimeEnvironment will automatically adjust wall time based on real_time_factor
-        yield self.env.timeout(duration)
-        print(f"\n⏰ Duration {duration}s completed - closing visualization")
+        if duration_mode == 'wall_time':
+            # Wall time mode: wait for actual elapsed time regardless of real_time_factor
+            start_time = time.time()
+            while time.time() - start_time < duration and not self._shutdown_requested:
+                # Use much smaller timeout to maintain simulation responsiveness
+                yield self.env.timeout(0.01)  # Check every 10ms in simulation time
+            print(f"\n⏰ Wall time duration {duration}s completed - closing visualization")
+        else:
+            # Simulation time mode (default): wait for simulation time duration
+            # The RealtimeEnvironment will automatically adjust wall time based on real_time_factor
+            yield self.env.timeout(duration)
+            print(f"\n⏰ Simulation time duration {duration}s completed - closing visualization")
+            
         self._shutdown_requested = True
         if self.visualizer and hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
             try:
@@ -644,13 +657,14 @@ class SimulationManager:
         except Exception as e:
             print(f"⚠️ Failed to create mesh for {object_name}: {e}")
     
-    def run(self, duration: Optional[float] = None, auto_close: bool = False) -> bool:
+    def run(self, duration: Optional[float] = None, auto_close: bool = False, duration_mode: str = 'sim_time') -> bool:
         """
         Run simulation until Ctrl+C, window close, or duration expires
         
         Args:
-            duration: Optional simulation duration in seconds
+            duration: Optional duration in seconds
             auto_close: If True, automatically close visualization when duration expires
+            duration_mode: 'sim_time' (default) for simulation time, 'wall_time' for real elapsed time
             
         Returns:
             Success status
@@ -766,18 +780,26 @@ class SimulationManager:
                 # Headless mode: let RealtimeEnvironment handle timing properly
                 if duration:
                     # Start duration monitor process for headless mode
-                    duration_process = self.env.process(self._duration_monitor(duration))
-                    print(f"🕐 Headless simulation will run for {duration}s (real-time factor: {self.config.real_time_factor}x)")
+                    duration_process = self.env.process(self._duration_monitor(duration, duration_mode))
+                    
+                    if duration_mode == 'wall_time':
+                        print(f"🕐 Headless simulation will run for {duration}s wall time (regardless of RTF {self.config.real_time_factor}x)")
+                    else:
+                        print(f"🕐 Headless simulation will run for {duration}s simulation time (RTF {self.config.real_time_factor}x → ~{duration/self.config.real_time_factor:.1f}s wall time)")
                     
                     # Run SimPy environment until duration expires - let RealtimeEnvironment handle timing
                     try:
-                        # Run until duration monitor finishes
-                        self.env.run(until=self.env.now + duration + 0.1)  # Allow slight buffer
+                        if duration_mode == 'wall_time':
+                            # For wall time mode, run longer to ensure duration monitor completes
+                            self.env.run(until=self.env.now + duration * self.config.real_time_factor + 1.0)
+                        else:
+                            # For sim time mode, run until duration monitor finishes
+                            self.env.run(until=self.env.now + duration + 0.1)  # Allow slight buffer
                     except simpy.core.EmptySchedule:
                         # All processes finished naturally
                         print(f"\n⏰ Headless simulation completed naturally")
                         
-                    print(f"\n⏰ Headless simulation duration ({duration}s) completed")
+                    print(f"\n⏰ Headless simulation duration ({duration}s {duration_mode}) completed")
                 else:
                     try:
                         # Infinite headless simulation
@@ -850,6 +872,14 @@ class SimulationManager:
         if self.time_manager:
             return self.time_manager.get_real_time_factor()
         return self.config.real_time_factor
+    
+    def set_speed_limit_enabled(self, enabled: bool):
+        """Enable or disable automatic speed limiting to prevent actual speed from exceeding target"""
+        if self.time_manager:
+            self.time_manager.set_speed_limit_enabled(enabled)
+            print(f"🚦 SimulationManager: Speed limiting {'ENABLED' if enabled else 'DISABLED'}")
+        else:
+            print("⚠️ TimeManager not available - speed limiting not available")
     
     # Centralized time management methods (memo.txt item 10)
     def get_sim_time(self) -> float:
