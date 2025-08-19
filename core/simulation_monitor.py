@@ -4,6 +4,23 @@ SimPyROS Simulation Monitor Window
 
 Displays real-time simulation statistics and timing information in a separate tkinter window.
 Works with all visualization backends including process_separated_pyvista.
+
+Features:
+- Live simulation time, real-time factor, and timing accuracy monitoring
+- Active robot and object counters
+- Play/Pause/Reset control buttons
+- X11-safe implementation using basic tk widgets (no ttk)
+- Automatic error handling and graceful window cleanup
+- Cross-platform compatibility with robust display handling
+
+The monitor was redesigned to eliminate X11 RENDER errors by:
+- Using basic tk.Label instead of ttk.Label
+- Removing all font specifications that trigger X11 glyph rendering
+- Avoiding emoji characters in button text
+- Using minimal styling (bg='white', fg='black' only)
+
+Usage:
+    python examples/beginner/basic_simulation.py --enable-monitor
 """
 
 import tkinter as tk

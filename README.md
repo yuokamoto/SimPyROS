@@ -31,8 +31,10 @@ This enables **superior performance** (1500+ Hz headless), **simplified debuggin
 - 🎯 **Simplified Interface**: ~20 lines for complete simulations
 - 📊 **Real-Time Control**: Dynamic speed, pause/resume, reset functionality
 - ⏱️ **Unified Time Management**: Centralized sim_time access for all components
+- 📈 **Real-Time Monitor**: Simulation statistics window with live updates
 - 🧪 **High Performance**: 1500+ Hz headless, 60+ Hz with visualization
 - 🔧 **Processing Time Compensation**: Accurate real-time synchronization
+- 🛡️ **X11 Error-Free**: Robust display handling across all platforms
 
 ## 🚀 Quick Start
 
@@ -61,6 +63,9 @@ source simpyros-env/bin/activate
 
 # Start with basics
 python examples/beginner/basic_simulation.py --vis
+
+# With monitor window for real-time statistics
+python examples/beginner/basic_simulation.py --vis --enable-monitor
 
 # Experience advanced multi-robot
 python examples/advanced/all_features_demo.py --vis
@@ -140,14 +145,21 @@ SimulationManager._simulation_process_loop():
 
 ## 🎮 Interactive Features
 
-All simulations include:
+### 3D Visualization Controls
 - **Real-time factor control** (0.1x to 5.0x speed with slider)
-- **Play/Pause/Reset** buttons with emoji labels
+- **Play/Pause/Reset** buttons with intuitive labels
 - **🎯 Axes**: Toggle coordinate axis display
 - **🚧 Collision**: Toggle collision geometry display  
 - **🕸️ Wire**: Toggle wireframe rendering mode
-- **Simulation time display** with frame rate monitoring
-- **Mouse-controlled 3D navigation**
+- **Mouse-controlled 3D navigation** with smooth camera movement
+
+### Real-Time Monitor Window (--enable-monitor)
+- **Live simulation statistics**: time, speed, frame rate
+- **Timing accuracy monitoring**: real-time factor precision
+- **Robot and object counters**: active components display
+- **Architecture information**: current simulation mode
+- **Control buttons**: Play/Pause/Reset functionality
+- **X11-safe implementation**: works across all display environments
 
 ## 🤖 Robot Models
 
@@ -194,6 +206,10 @@ echo $DISPLAY
 
 # For headless servers
 export DISPLAY=:0
+
+# Monitor window issues (X11 RENDER errors)
+# Use --enable-monitor flag carefully on some systems
+# If errors occur, run without monitor: (exclude --enable-monitor)
 ```
 
 ### Installation Issues

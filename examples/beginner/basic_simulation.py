@@ -15,10 +15,12 @@ Options:
     --example {simple,mobile,multi,performance,all}  Choose which example to run (default: all)
     --num-robots N               Number of robots for performance demo (default: 10)
     --frequency-grouping         Enable frequency grouping optimization for performance demo
+    --enable-monitor             Enable real-time monitor window with simulation statistics
 
 Examples:
     python basic_simulation.py                           # Run all examples headless at 1x speed
     python basic_simulation.py --vis                     # Run all examples with PyVista visualization
+    python basic_simulation.py --vis --enable-monitor    # Run with visualization and monitor window
     python basic_simulation.py --vis --visualization-backend meshcat  # Run with MeshCat web visualization
     python basic_simulation.py --vis --visualization-backend pyvista  # Standard PyVista
     python basic_simulation.py --rtf 2.0                 # Run at 2x speed
