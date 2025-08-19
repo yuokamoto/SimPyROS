@@ -33,12 +33,18 @@ import os
 import math
 import time
 import argparse
+import logging
 
 # Add parent directories to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core.simulation_manager import SimulationManager
 from core.simulation_object import Velocity, Pose
+
+# Performance optimization: Debug level control
+DEBUG_LEVEL = os.getenv('SIMPYROS_DEBUG', '1')  # 0=None, 1=Minimal, 2=Verbose
+DEBUG_MINIMAL = DEBUG_LEVEL in ['1', '2']
+DEBUG_VERBOSE = DEBUG_LEVEL == '2'
 
 
 def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0):
@@ -102,20 +108,21 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         callback_count = 0
         
         def my_control(dt: float):
-            """Simple sinusoidal joint motion with intelligent feedback"""
+            """Simple sinusoidal joint motion with optimized debug output"""
             nonlocal callback_count
             callback_count += 1
             
             t = sim.get_sim_time()
             
-            # Adaptive debug output
-            show_debug = (callback_count <= 10 or 
-                         callback_count % 100 == 0 or
-                         (callback_count <= 50 and callback_count % 10 == 0))
-            
-            if show_debug:
-                real_time = sim.get_real_time() if hasattr(sim, 'get_real_time') else 0
-                print(f"🔄 Control #{callback_count}: sim_t={t:.2f}s, real_t={real_time:.2f}s, dt={dt:.4f}s")
+            # Optimized debug output - only when debugging enabled
+            if DEBUG_MINIMAL:
+                show_debug = (callback_count <= 10 or 
+                             callback_count % 100 == 0 or
+                             (callback_count <= 50 and callback_count % 10 == 0))
+                
+                if show_debug and DEBUG_VERBOSE:
+                    real_time = sim.get_real_time() if hasattr(sim, 'get_real_time') else 0
+                    print(f"🔄 Control #{callback_count}: sim_t={t:.2f}s, real_t={real_time:.2f}s, dt={dt:.4f}s")
             
             # Apply smooth sinusoidal motion to all movable joints
             if movable_joints:
@@ -125,14 +132,14 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
                     phase = i * math.pi / 3  # Phase offset between joints
                     position = amplitude * math.sin(t * frequency + phase)
                     
-                    # Debug output for first joint only
-                    if show_debug and i == 0:
+                    # Debug output for first joint only (only in verbose mode)
+                    if DEBUG_VERBOSE and callback_count <= 10 and i == 0:
                         print(f"   Joint '{joint_name}': {position:.3f} rad ({math.degrees(position):.1f}°)")
                     
                     sim.set_robot_joint_position("my_robot", joint_name, position)
             else:
-                # No movable joints - just track timing
-                if show_debug:
+                # No movable joints - minimal debug output
+                if DEBUG_VERBOSE and callback_count <= 3:
                     print(f"   No joint motion (robot has no movable joints)")
         
         sim.set_robot_control_callback("my_robot", my_control, frequency=10.0)
@@ -180,29 +187,32 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
                         unified_process=unified_process  # Use parameter from function call
         )
         
-        # Debug: Mobile robot callback counter
+        # Mobile robot callback counter and velocity cache
         mobile_callback_count = 0
         
+        # Performance optimization: Pre-cache velocity objects
+        velocity_cache = {
+            'circular': Velocity(linear_x=0.5, angular_z=0.3),
+            'forward': Velocity(linear_x=0.5, angular_z=0.0),
+            'turn_left': Velocity(linear_x=0.2, angular_z=0.5),
+            'turn_right': Velocity(linear_x=0.2, angular_z=-0.5)
+        }
+        
         def mobile_control(dt: float):
-            """Move robot in circle"""
+            """Move robot in circle with optimized velocity handling"""
             nonlocal mobile_callback_count
             mobile_callback_count += 1
             
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
             
-            # Print debug info for first 10 calls, then every 50 calls
-            if mobile_callback_count <= 10 or mobile_callback_count % 50 == 0:
+            # Optimized debug output - only when debugging enabled
+            if DEBUG_VERBOSE and (mobile_callback_count <= 10 or mobile_callback_count % 50 == 0):
                 print(f"🚗 Mobile Callback #{mobile_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
                 if mobile_callback_count <= 3:
-                    print(f"   Setting velocity: linear_x=0.5, angular_z=0.3")
+                    print(f"   Using cached velocity objects for performance")
             
-            linear_speed = 0.5
-            angular_speed = 0.3
-            
-            velocity = Velocity(
-                linear_x=linear_speed,
-                angular_z=angular_speed
-            )
+            # Use pre-cached velocity object instead of creating new one
+            velocity = velocity_cache['circular']
             sim.set_robot_velocity("mobile_robot", velocity)
         
         sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=10.0)
@@ -247,43 +257,45 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0), unified_process=False)
         robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0), unified_process=False)
         
-        # Debug: Multi robot callback counters
+        # Multi robot callback counters and joint caching
         robot1_callback_count = 0
         robot2_callback_count = 0
         
+        # Performance optimization: Cache movable joint names
+        robot1_movable_joints = [name for name in robot1.get_joint_names() 
+                                if robot1.joints[name].joint_type.value != 'fixed']
+        robot2_movable_joints = [name for name in robot2.get_joint_names() 
+                                if robot2.joints[name].joint_type.value != 'fixed']
+        
         def control_robot1(dt):
-            """Control first robot"""
+            """Control first robot with optimized joint access"""
             nonlocal robot1_callback_count
             robot1_callback_count += 1
             
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
             
-            # Print debug info for first few calls
-            if robot1_callback_count <= 5 or robot1_callback_count % 25 == 0:
+            # Optimized debug output
+            if DEBUG_VERBOSE and (robot1_callback_count <= 5 or robot1_callback_count % 25 == 0):
                 print(f"🤖1 Robot1 Callback #{robot1_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
             
-            joint_names = [name for name in robot1.get_joint_names() 
-                          if robot1.joints[name].joint_type.value != 'fixed']
-            
-            for i, joint_name in enumerate(joint_names):
+            # Use cached joint names instead of querying every time
+            for i, joint_name in enumerate(robot1_movable_joints):
                 position = 0.3 * math.sin(t * 2 + i)
                 sim.set_robot_joint_position("robot1", joint_name, position)
         
         def control_robot2(dt):
-            """Control second robot"""
+            """Control second robot with optimized joint access"""
             nonlocal robot2_callback_count
             robot2_callback_count += 1
             
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
             
-            # Print debug info for first few calls
-            if robot2_callback_count <= 5 or robot2_callback_count % 25 == 0:
+            # Optimized debug output
+            if DEBUG_VERBOSE and (robot2_callback_count <= 5 or robot2_callback_count % 25 == 0):
                 print(f"🤖2 Robot2 Callback #{robot2_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
             
-            joint_names = [name for name in robot2.get_joint_names() 
-                          if robot2.joints[name].joint_type.value != 'fixed']
-            
-            for i, joint_name in enumerate(joint_names):
+            # Use cached joint names instead of querying every time
+            for i, joint_name in enumerate(robot2_movable_joints):
                 position = 0.4 * math.cos(t * 1.5 + i * math.pi / 2)
                 sim.set_robot_joint_position("robot2", joint_name, position)
         
@@ -545,20 +557,23 @@ def headless_example():
     
     frame_count = 0
     
+    # Performance optimization: Cache joint names for headless mode
+    headless_movable_joints = [name for name in robot.get_joint_names() 
+                              if robot.joints[name].joint_type.value != 'fixed']
+    
     def headless_control(dt):
-        """High-frequency control for headless mode"""
+        """High-frequency control for headless mode with optimizations"""
         nonlocal frame_count
         frame_count += 1
         
-        if frame_count % 100 == 0:  # Print every second at 100Hz
+        # Optimized debug output
+        if DEBUG_MINIMAL and frame_count % 100 == 0:  # Print every second at 100Hz
             print(f"🔄 Frame {frame_count}, dt={dt:.4f}s")
         
-        # Simple joint motion
+        # Simple joint motion with cached joint names
         t = sim.get_sim_time()  # Use simulation time for real-time factor control
-        joint_names = [name for name in robot.get_joint_names() 
-                      if robot.joints[name].joint_type.value != 'fixed']
         
-        for i, joint_name in enumerate(joint_names):
+        for i, joint_name in enumerate(headless_movable_joints):
             position = 0.2 * math.sin(t * 3 + i)
             sim.set_robot_joint_position("headless_robot", joint_name, position)
     
@@ -577,8 +592,8 @@ def main():
     parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
     parser.add_argument('--visualization', '--vis', action='store_true', 
                        help='Enable visualization (default: False)')
-    parser.add_argument('--visualization-backend', choices=['pyvista', 'meshcat', 'process_separated_pyvista'], default='process_separated_pyvista',
-                       help='Visualization backend (default: pyvista)')
+    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'meshcat', 'process_separated_pyvista', 'process_separated_pyvista_v2'], default='process_separated_pyvista',
+                       help='Visualization backend (default: process_separated_pyvista)')
     parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
                        help='Real-time speed multiplier (default: 1.0)')
     parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all',

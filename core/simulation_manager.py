@@ -34,6 +34,7 @@ from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visua
 from core.meshcat_visualizer import MeshCatURDFRobotVisualizer, create_meshcat_visualizer
 from core.time_manager import TimeManager, set_global_time_manager
 from core.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
+from core.process_separated_urdf_visualizer_v2 import create_process_separated_urdf_visualizer_v2
 
 
 @dataclass
@@ -49,7 +50,7 @@ class SimulationConfig:
     enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
     
     # Visualization backend settings
-    visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'meshcat', 'process_separated_pyvista'
+    visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'meshcat', 'process_separated_pyvista', 'process_separated_pyvista_v2'
     use_optimized_visualizer: bool = False  # Use optimized PyVista visualizer (deprecated, use visualization_backend)
     visualization_optimization_level: str = 'balanced'  # 'performance', 'balanced', 'quality'
     enable_batch_rendering: bool = True  # Enable batch rendering for multiple robots
@@ -209,6 +210,16 @@ class SimulationManager:
                         max_links_per_robot=self.config.max_links_per_robot
                     )
                     
+                elif backend == 'process_separated_pyvista_v2':
+                    print(f"⚡ Creating process-separated PyVista visualizer V2 (optimized URDF)")
+                    from core.process_separated_pyvista_v2 import SharedMemoryConfig
+                    v2_config = SharedMemoryConfig(
+                        max_robots=self.config.max_robots,
+                        max_links_per_robot=self.config.max_links_per_robot,
+                        update_frequency=self.config.visualization_update_rate
+                    )
+                    self.visualizer = create_process_separated_urdf_visualizer_v2(config=v2_config)
+                    
                 elif backend == 'optimized_pyvista':
                     warnings.warn("optimized_pyvista backend is deprecated. Using process_separated_pyvista instead.", DeprecationWarning)
                     print(f"⚡ Creating process-separated PyVista visualizer (optimized_pyvista deprecated)")
@@ -248,6 +259,13 @@ class SimulationManager:
                         print(f"   📊 Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")
                         print(f"   🛡️ Crash isolation: PyVista crashes don't affect simulation")
                         print(f"   🚀 Non-blocking updates: SimPy performance maintained")
+                        
+                    elif backend == 'process_separated_pyvista_v2':
+                        print(f"   ⚡ Process separation V2: ENABLED (optimized URDF)")
+                        print(f"   🎨 Geometry: One-time transfer via Queue")
+                        print(f"   🔄 Poses: Continuous updates via shared memory")
+                        print(f"   📊 Standard PyVista logic: URDF compatibility")
+                        print(f"   🚀 Performance: Minimal data transfer overhead")
                         
                     elif backend == 'pyvista':
                         print(f"   📺 Standard PyVista rendering")

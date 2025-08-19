@@ -19,12 +19,13 @@ import time
 import signal
 import numpy as np
 import multiprocessing as mp
-from multiprocessing import shared_memory
+from multiprocessing import shared_memory, Queue
 from typing import Dict, List, Optional, Tuple, Any
 import struct
 import warnings
 from dataclasses import dataclass
 import threading
+import pickle
 
 # Add parent directory to path
 import sys
@@ -34,31 +35,41 @@ from core.simulation_object import Pose
 
 
 @dataclass
-class RobotVisualizationData:
-    """ロボット可視化データ構造"""
+class RobotGeometryData:
+    """ロボットのgeometry情報（初期化時に一回だけ送信）"""
     robot_name: str
-    num_links: int
-    link_transforms: np.ndarray  # shape: (num_links, 4, 4)
-    link_names: List[str]
+    urdf_data: Any  # Complete Robot instance with URDF loader
+    initial_pose: 'Pose'
+    timestamp: float
+
+@dataclass
+class RobotJointData:
+    """ロボットの関節情報（継続的にshared memoryで更新）"""
+    robot_name: str
+    joint_positions: Dict[str, float]  # joint_name -> position
+    base_pose: 'Pose'  # Robot base position/orientation
     timestamp: float
     
 
 @dataclass
 class SharedMemoryConfig:
-    """共有メモリ設定"""
+    """共有メモリ設定（関節情報のみ）"""
     max_robots: int = 10
-    max_links_per_robot: int = 20
-    transform_size: int = 16  # 4x4 matrix = 16 floats
+    max_joints_per_robot: int = 20
     update_frequency: float = 30.0  # Hz
+    
+    # データサイズ計算用
+    pose_size: int = 7  # x, y, z, qw, qx, qy, qz
+    joint_value_size: int = 1  # joint position (float)
 
 
 class SharedMemoryManager:
     """
-    共有メモリ管理クラス
+    共有メモリ管理クラス（関節情報のみ）
     
     データレイアウト:
     - Header: [num_robots, update_counter, timestamp]
-    - Robot Data: [robot_id, num_links, transforms[num_links][4][4], dirty_flag]
+    - Robot Data: [robot_id, num_joints, base_pose[7], joint_positions[num_joints], dirty_flag]
     """
     
     def __init__(self, config: SharedMemoryConfig):
@@ -375,8 +386,18 @@ class PyVistaVisualizationProcess:
             # PyVista初期化
             import pyvista as pv
             
-            # 可視化設定（標準PyVistaと完全同等）
-            pv.OFF_SCREEN = False  # 明示的にオンスクリーンを設定
+            # ディスプレイ確認
+            display = os.environ.get('DISPLAY', '')
+            interactive_mode = bool(display and display != '')
+            
+            if not interactive_mode:
+                print("💻 Headless mode detected - starting Xvfb")
+                pv.start_xvfb()
+            else:
+                print(f"📺 Interactive mode detected - DISPLAY={display}")
+            
+            # 可視化設定
+            pv.OFF_SCREEN = not interactive_mode
             pv.set_plot_theme('document')  # 標準PyVistaと同じテーマ
             
             plotter = pv.Plotter(
