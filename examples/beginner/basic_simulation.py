@@ -592,7 +592,7 @@ def main():
     parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
     parser.add_argument('--visualization', '--vis', action='store_true', 
                        help='Enable visualization (default: False)')
-    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'meshcat', 'process_separated_pyvista', 'process_separated_pyvista_v2'], default='process_separated_pyvista',
+    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'meshcat', 'process_separated_pyvista'], default='process_separated_pyvista',
                        help='Visualization backend (default: process_separated_pyvista)')
     parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
                        help='Real-time speed multiplier (default: 1.0)')

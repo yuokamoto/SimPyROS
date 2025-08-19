@@ -2,16 +2,10 @@
 """
 Process-Separated PyVista Visualizer for SimPyROS
 
-PyVistaを別プロセスで実行し、共有メモリでデータを高速受け渡し
-
-Features:
-1. 完全なプロセス分離 - SimPyシミュレーションに影響しない
-2. 共有メモリ - 高速データ転送
-3. Non-blocking updates - シミュレーション性能維持
-4. Crash isolation - PyVistaクラッシュがシミュレーションに影響しない
-
-Architecture:
-SimPy Process -> Shared Memory -> PyVista Process
+Optimized architecture:
+1. One-time geometry transfer via multiprocessing.Queue
+2. Continuous link_pose updates via shared memory
+3. Standard PyVistaVisualizer logic compatibility
 """
 
 import os
@@ -36,929 +30,743 @@ from core.simulation_object import Pose
 
 @dataclass
 class RobotGeometryData:
-    """ロボットのgeometry情報（初期化時に一回だけ送信）"""
+    """Robot geometry information (one-time transfer)"""
     robot_name: str
-    urdf_data: Any  # Complete Robot instance with URDF loader
-    initial_pose: 'Pose'
+    links_data: Dict[str, Any]  # Detailed serializable link data
+    urdf_links_data: Dict[str, Any]  # URDF visual origin data 
+    initial_pose: Pose
     timestamp: float
 
-@dataclass
-class RobotJointData:
-    """ロボットの関節情報（継続的にshared memoryで更新）"""
-    robot_name: str
-    joint_positions: Dict[str, float]  # joint_name -> position
-    base_pose: 'Pose'  # Robot base position/orientation
-    timestamp: float
-    
 
 @dataclass
+class RobotPoseUpdate:
+    """Robot pose update (continuous shared memory)"""
+    robot_name: str
+    link_poses: Dict[str, Pose]  # link_name -> current_pose
+    timestamp: float
+
+
+@dataclass 
 class SharedMemoryConfig:
-    """共有メモリ設定（関節情報のみ）"""
+    """Shared memory configuration for pose updates only"""
     max_robots: int = 10
-    max_joints_per_robot: int = 20
+    max_links_per_robot: int = 20
     update_frequency: float = 30.0  # Hz
     
-    # データサイズ計算用
+    # Data size calculations
     pose_size: int = 7  # x, y, z, qw, qx, qy, qz
-    joint_value_size: int = 1  # joint position (float)
 
 
-class SharedMemoryManager:
+class PoseSharedMemoryManager:
     """
-    共有メモリ管理クラス（関節情報のみ）
+    Shared memory manager for link poses only
     
-    データレイアウト:
+    Data layout:
     - Header: [num_robots, update_counter, timestamp]
-    - Robot Data: [robot_id, num_joints, base_pose[7], joint_positions[num_joints], dirty_flag]
+    - Robot Data: [robot_id, num_links, link_poses[num_links][7], dirty_flag]
     """
     
     def __init__(self, config: SharedMemoryConfig):
         self.config = config
         self.shm_size = self._calculate_memory_size()
         
-        # 共有メモリ名を一意にする（複数インスタンス対応）
+        # Generate unique shared memory name
         import time
-        self.shm_name = f"simpyros_pyvista_{int(time.time() * 1000) % 10000}"
+        self.shm_name = f"simpyros_poses_{int(time.time() * 1000) % 10000}"
         
-        # 共有メモリ作成
+        # Create shared memory
         try:
             self.shm = shared_memory.SharedMemory(
                 name=self.shm_name, 
                 create=True, 
                 size=self.shm_size
             )
-            print(f"✅ 共有メモリ作成: {self.shm_name}, {self.shm_size} bytes")
+            print(f"✅ 共有メモリ作成(Pose): {self.shm_name}, {self.shm_size} bytes")
             
         except Exception as e:
             print(f"❌ 共有メモリ作成失敗: {e}")
             raise
         
-        # メモリを初期化
+        # Initialize memory
         self.shm.buf[:] = b'\x00' * self.shm_size
         
-        # メモリレイアウト計算
+        # Setup memory layout
         self._setup_memory_layout()
         
-        # ロボット管理
+        # Robot registry
         self.robot_registry = {}  # robot_name -> robot_id
         self.next_robot_id = 0
         
-        # ヘッダー初期化
+        # Initialize header
         self._initialize_header()
         
     def _calculate_memory_size(self) -> int:
-        """必要な共有メモリサイズを計算"""
-        header_size = 5 * 8  # num_robots, update_counter, timestamp, sim_time, real_time (double)
+        """Calculate required memory size for poses only"""
+        header_size = 3 * 8  # num_robots, update_counter, timestamp
         
-        robot_data_size = (
-            8 +  # robot_id (int64)
-            8 +  # num_links (int64) 
-            8 +  # timestamp (double)
-            8 +  # dirty_flag (int64)
-            self.config.max_links_per_robot * self.config.transform_size * 8 +  # transforms (double)
-            256  # robot_name (fixed string)
-        )
+        # Robot data size calculation
+        robot_header_size = 3 * 8  # robot_id, num_links, dirty_flag
+        link_poses_size = self.config.max_links_per_robot * self.config.pose_size * 8  # poses
+        robot_name_size = 64  # Fixed string size
+        robot_data_size = robot_header_size + link_poses_size + robot_name_size
         
         total_size = header_size + (self.config.max_robots * robot_data_size)
         
-        # アライメント調整
+        # Alignment
         return ((total_size + 4095) // 4096) * 4096
         
     def _setup_memory_layout(self):
-        """メモリレイアウトのオフセット計算"""
+        """Setup memory layout offsets"""
         self.header_offset = 0
-        self.robots_offset = 5 * 8  # header size (expanded for timing info)
+        self.robots_offset = 3 * 8  # header size
         
         self.robot_size = (
             8 +  # robot_id
-            8 +  # num_links
-            8 +  # timestamp  
+            8 +  # num_links  
             8 +  # dirty_flag
-            self.config.max_links_per_robot * self.config.transform_size * 8 +  # transforms
-            256  # robot_name
+            self.config.max_links_per_robot * self.config.pose_size * 8 +  # link poses
+            64   # robot_name
         )
         
     def _initialize_header(self):
-        """ヘッダー部分を初期化（時間情報追加）"""
-        try:
-            # num_robots = 0
-            struct.pack_into('q', self.shm.buf, 0, 0)
-            # update_counter = 0
-            struct.pack_into('q', self.shm.buf, 8, 0)
-            # timestamp = current time
-            struct.pack_into('d', self.shm.buf, 16, time.time())
-            # sim_time = 0.0
-            struct.pack_into('d', self.shm.buf, 24, 0.0)
-            # real_time = 0.0  
-            struct.pack_into('d', self.shm.buf, 32, 0.0)
-            
-            # 全ロボットスロットを初期化
-            for robot_id in range(self.config.max_robots):
-                robot_offset = self.robots_offset + (robot_id * self.robot_size)
-                # robot_id = -1 (未使用を示す)
-                struct.pack_into('q', self.shm.buf, robot_offset, -1)
-                # num_links = 0
-                struct.pack_into('q', self.shm.buf, robot_offset + 8, 0)
-                # dirty_flag = 0
-                struct.pack_into('q', self.shm.buf, robot_offset + 24, 0)
-                
-            print(f"🔧 共有メモリヘッダー初期化完了 (max_robots: {self.config.max_robots})")
-            
-        except Exception as e:
-            print(f"⚠️ ヘッダー初期化エラー: {e}")
-    
-    def _find_available_slot(self) -> int:
-        """空いているロボットスロットを探す"""
-        for robot_id in range(self.config.max_robots):
-            robot_offset = self.robots_offset + (robot_id * self.robot_size)
-            try:
-                stored_robot_id = struct.unpack_from('q', self.shm.buf, robot_offset)[0]
-                if stored_robot_id == -1:  # 未使用スロット
-                    return robot_id
-            except:
-                continue
-        return -1  # 空きスロットなし
+        """Initialize shared memory header"""
+        header_data = struct.pack('QQd', 0, 0, time.time())  # num_robots, counter, timestamp
+        self.shm.buf[self.header_offset:self.header_offset + len(header_data)] = header_data
         
     def register_robot(self, robot_name: str, num_links: int) -> int:
-        """ロボットを登録し、robot_idを返す"""
+        """Register a new robot and return robot_id"""
         if robot_name in self.robot_registry:
             return self.robot_registry[robot_name]
-        
-        # 空いているスロットを探す
-        robot_id = self._find_available_slot()
-        if robot_id == -1:
-            raise ValueError(f"Maximum robots ({self.config.max_robots}) exceeded. Current: {len(self.robot_registry)}")
             
+        robot_id = self.next_robot_id
         self.robot_registry[robot_name] = robot_id
+        self.next_robot_id += 1
         
-        # 共有メモリにロボット情報を書き込み
-        robot_offset = self.robots_offset + (robot_id * self.robot_size)
+        # Update num_robots in header
+        current_header = struct.unpack('QQd', self.shm.buf[self.header_offset:self.header_offset + 24])
+        new_header = struct.pack('QQd', self.next_robot_id, current_header[1], time.time())
+        self.shm.buf[self.header_offset:self.header_offset + 24] = new_header
         
-        # robot_id
-        struct.pack_into('q', self.shm.buf, robot_offset, robot_id)
-        # num_links
-        struct.pack_into('q', self.shm.buf, robot_offset + 8, num_links)
-        # robot_name (256 bytes固定長)
-        name_bytes = robot_name.encode('utf-8')[:255]
-        name_bytes += b'\x00' * (256 - len(name_bytes))
-        self.shm.buf[robot_offset + 32:robot_offset + 32 + 256] = name_bytes
-        
-        print(f"📝 ロボット登録: {robot_name} -> ID {robot_id}, {num_links} links")
+        print(f"🤖 Robot registered: {robot_name} (ID: {robot_id}, Links: {num_links})")
         return robot_id
         
-    def update_robot_transforms(self, robot_name: str, transforms: np.ndarray) -> bool:
-        """ロボットの変換行列を更新"""
+    def update_robot_poses(self, robot_name: str, link_poses: Dict[str, Pose]) -> bool:
+        """Update robot link poses in shared memory"""
         if robot_name not in self.robot_registry:
-            print(f"⚠️ Unknown robot: {robot_name}")
+            print(f"⚠️ Robot {robot_name} not registered")
             return False
             
         robot_id = self.robot_registry[robot_name]
         robot_offset = self.robots_offset + (robot_id * self.robot_size)
         
         try:
-            # timestamp更新
-            current_time = time.time()
-            struct.pack_into('d', self.shm.buf, robot_offset + 16, current_time)
+            # Convert poses to numpy array
+            pose_data = []
+            link_names = sorted(link_poses.keys())  # Consistent ordering
             
-            # transforms更新 (flatten to 1D array)
-            transforms_flat = transforms.flatten()
-            max_elements = self.config.max_links_per_robot * self.config.transform_size
+            for link_name in link_names[:self.config.max_links_per_robot]:
+                pose = link_poses[link_name]
+                # Get quaternion as [x, y, z, w] from scipy
+                quat = pose.quaternion  # [x, y, z, w]
+                pose_array = [
+                    pose.x, pose.y, pose.z,
+                    quat[3], quat[0], quat[1], quat[2]  # [w, x, y, z] order for shared memory
+                ]
+                pose_data.extend(pose_array)
             
-            if len(transforms_flat) > max_elements:
-                print(f"⚠️ Too many transform elements: {len(transforms_flat)} > {max_elements}")
-                transforms_flat = transforms_flat[:max_elements]
+            # Pad if necessary
+            while len(pose_data) < self.config.max_links_per_robot * self.config.pose_size:
+                pose_data.append(0.0)
             
-            # 共有メモリに書き込み
-            transforms_offset = robot_offset + 32 + 256  # skip header + name
-            for i, value in enumerate(transforms_flat):
-                struct.pack_into('d', self.shm.buf, transforms_offset + (i * 8), float(value))
+            # Pack robot data with fixed size
+            max_pose_data_size = self.config.max_links_per_robot * self.config.pose_size
             
-            # dirty flagを設定
-            struct.pack_into('q', self.shm.buf, robot_offset + 24, 1)
+            # Pack robot header first
+            robot_header = struct.pack('QQQ', robot_id, len(link_names), 1)  # dirty_flag=1
             
-            # グローバル更新カウンター
-            self._increment_update_counter()
+            # Pack pose data with fixed size
+            pose_data_bytes = struct.pack(f'{max_pose_data_size}d', *pose_data)
+            
+            # Pack robot name
+            robot_name_bytes = robot_name.encode('utf-8')[:63] + b'\x00'
+            robot_name_padded = robot_name_bytes.ljust(64, b'\x00')
+            
+            # Calculate exact offsets
+            header_end = robot_offset + 24  # 3 * 8 bytes for header
+            pose_end = header_end + len(pose_data_bytes)
+            name_end = pose_end + 64
+            
+            # Write to shared memory in fixed chunks
+            self.shm.buf[robot_offset:header_end] = robot_header
+            self.shm.buf[header_end:pose_end] = pose_data_bytes
+            self.shm.buf[pose_end:name_end] = robot_name_padded
+            
+            # Update header counter
+            current_header = struct.unpack('QQd', self.shm.buf[self.header_offset:self.header_offset + 24])
+            new_header = struct.pack('QQd', current_header[0], current_header[1] + 1, time.time())
+            self.shm.buf[self.header_offset:self.header_offset + 24] = new_header
             
             return True
             
         except Exception as e:
-            print(f"❌ Transform update failed: {e}")
+            print(f"❌ Pose update failed for {robot_name}: {e}")
             return False
-    
-    def _increment_update_counter(self):
-        """グローバル更新カウンターをインクリメント"""
-        try:
-            counter = struct.unpack_from('q', self.shm.buf, 8)[0]
-            struct.pack_into('q', self.shm.buf, 8, counter + 1)
-            struct.pack_into('d', self.shm.buf, 16, time.time())
-        except:
-            pass
-    
-    def update_timing_info(self, sim_time: float, real_time: float):
-        """Update simulation timing information in shared memory"""
-        try:
-            # Update sim_time at offset 24
-            struct.pack_into('d', self.shm.buf, 24, sim_time)
-            # Update real_time at offset 32  
-            struct.pack_into('d', self.shm.buf, 32, real_time)
-            # Update timestamp
-            struct.pack_into('d', self.shm.buf, 16, time.time())
-            # Increment update counter to notify visualization process
-            self._increment_update_counter()
-            return True
-        except Exception as e:
-            print(f"⚠️ Failed to update timing info: {e}")
-            return False
-    
-    def get_robot_data(self, robot_id: int) -> Optional[Dict]:
-        """ロボットデータを取得（PyVistaプロセス用）"""
-        if robot_id >= self.config.max_robots:
-            return None
-            
-        robot_offset = self.robots_offset + (robot_id * self.robot_size)
-        
-        try:
-            # ヘッダー読み取り
-            stored_robot_id = struct.unpack_from('q', self.shm.buf, robot_offset)[0]
-            if stored_robot_id != robot_id:
-                return None
-                
-            num_links = struct.unpack_from('q', self.shm.buf, robot_offset + 8)[0]
-            timestamp = struct.unpack_from('d', self.shm.buf, robot_offset + 16)[0]
-            dirty_flag = struct.unpack_from('q', self.shm.buf, robot_offset + 24)[0]
-            
-            if dirty_flag == 0:
-                return None  # データ更新なし
-            
-            # robot_name読み取り
-            name_bytes = bytes(self.shm.buf[robot_offset + 32:robot_offset + 32 + 256])
-            robot_name = name_bytes.split(b'\x00')[0].decode('utf-8')
-            
-            # transforms読み取り
-            transforms_offset = robot_offset + 32 + 256
-            transforms_data = []
-            
-            for i in range(int(num_links)):
-                transform = np.zeros((4, 4))
-                for row in range(4):
-                    for col in range(4):
-                        idx = i * 16 + row * 4 + col
-                        offset = transforms_offset + (idx * 8)
-                        if offset + 8 <= len(self.shm.buf):
-                            value = struct.unpack_from('d', self.shm.buf, offset)[0]
-                            transform[row, col] = value
-                transforms_data.append(transform)
-            
-            # dirty flagをクリア
-            struct.pack_into('q', self.shm.buf, robot_offset + 24, 0)
-            
-            return {
-                'robot_id': robot_id,
-                'robot_name': robot_name,
-                'num_links': int(num_links),
-                'transforms': transforms_data,
-                'timestamp': timestamp
-            }
-            
-        except Exception as e:
-            print(f"❌ データ読み取りエラー: {e}")
-            return None
-    
-    def get_update_counter(self) -> int:
-        """グローバル更新カウンターを取得"""
-        try:
-            return struct.unpack_from('q', self.shm.buf, 8)[0]
-        except:
-            return 0
     
     def cleanup(self):
-        """共有メモリクリーンアップ"""
+        """Cleanup shared memory"""
         try:
             self.shm.close()
             self.shm.unlink()
-            print(f"🗑️ 共有メモリクリーンアップ完了: {self.shm_name}")
+            print(f"🧹 共有メモリクリーンアップ: {self.shm_name}")
         except:
             pass
 
 
 class PyVistaVisualizationProcess:
-    """
-    別プロセスで動作するPyVistaビジュアライザー
-    """
+    """PyVista visualization process with geometry + pose updates"""
     
-    def __init__(self, config: SharedMemoryConfig, shm_name: str):
+    def __init__(self, config: SharedMemoryConfig, shm_name: str, geometry_queue: Queue):
         self.config = config
         self.shm_name = shm_name
-        self.running = False
-    
-    def _setup_unified_scene(self, plotter, pv_module):
-        """Setup scene identical to standard PyVista visualizer"""
-        try:
-            # Add ground plane with same parameters as standard PyVista
-            ground = pv_module.Plane(
-                center=(0, 0, -0.2), 
-                direction=[0, 0, 1], 
-                i_size=10.0, 
-                j_size=10.0, 
-                i_resolution=20, 
-                j_resolution=20
-            )
-            plotter.add_mesh(ground, color='lightgray', opacity=0.6)
-            
-            # Set camera position identical to standard PyVista
-            plotter.camera_position = [(6, 6, 4), (0, 0, 1), (0, 0, 1)]
-            
-            print("✅ Unified scene setup complete (matching standard PyVista)")
-            return True
-            
-        except Exception as e:
-            print(f"⚠️ Scene setup warning: {e}")
-            return False
+        self.geometry_queue = geometry_queue
+        
+        # Robot storage
+        self.robots = {}  # robot_name -> visualization data
+        self.robot_actors = {}  # robot_name -> pyvista actors
+        self.robot_initial_meshes = {}  # robot_name -> {link_name -> initial_mesh}
+        
+        # Performance tracking
+        self.frame_count = 0
+        self.start_time = time.time()
+        
+        # PyVista module reference (will be set in run())
+        self.pv = None
+        self.plotter = None
+        self.shm = None
         
     def run(self):
-        """PyVista可視化プロセスのメインループ"""
-        print("🚀 PyVista可視化プロセス開始")
+        """Main visualization process loop"""
+        print(f"🚀 PyVista process starting (PID: {os.getpid()})")
         
         try:
-            # 共有メモリに接続
-            shm = shared_memory.SharedMemory(name=self.shm_name, create=False)
-            
-            # PyVista初期化
+            # Import PyVista in the visualization process
+            print("🔄 Importing PyVista...")
             import pyvista as pv
+            self.pv = pv  # Store reference for other methods
+            print(f"✅ PyVista imported successfully (version: {pv.__version__})")
             
-            # ディスプレイ確認
+            # Check if we have a display available
             display = os.environ.get('DISPLAY', '')
             interactive_mode = bool(display and display != '')
+            print(f"📺 Display check: DISPLAY={display}, interactive_mode={interactive_mode}")
             
             if not interactive_mode:
                 print("💻 Headless mode detected - starting Xvfb")
-                pv.start_xvfb()
+                pv.start_xvfb()  # Only for headless support
+                pv.OFF_SCREEN = True
             else:
                 print(f"📺 Interactive mode detected - DISPLAY={display}")
-            
-            # 可視化設定
-            pv.OFF_SCREEN = not interactive_mode
-            pv.set_plot_theme('document')  # 標準PyVistaと同じテーマ
-            
-            plotter = pv.Plotter(
-                title="SimPyROS - Process Separated PyVista", 
-                window_size=(1200, 800)  # 標準PyVistaと同じサイズ
-            )
-            
-            # 標準PyVistaと同じ背景色
-            plotter.set_background('lightblue')
-            
-            # 標準PyVistaと同等のシーン設定
-            self._setup_unified_scene(plotter, pv)
-            
-            # GPU最適化設定（標準PyVistaと同等）
-            try:
-                # マルチサンプリング設定
-                import vtk
-                render_window = plotter.render_window
-                render_window.SetMultiSamples(4)
+                # Set PyVista to use the display
+                pv.OFF_SCREEN = False
+                print(f"⚙️ PyVista OFF_SCREEN set to: {pv.OFF_SCREEN}")
                 
-                # 影を無効化してパフォーマンス向上
-                plotter.enable_shadows = False
-                
-                print("🚀 GPU optimizations applied")
-            except Exception as e:
-                print(f"⚠️ GPU optimization warning: {e}")
-            
-            # ロボット管理
-            robot_actors = {}
-            last_update_counter = 0
-            
-            # 時間表示設定（標準PyVistaと同等）
-            time_text_actor = plotter.add_text(
-                "Sim: 0.0s | Real: 0.0s | Speed: 1.0x",
-                position=(0.75, 0.95),  # 標準PyVistaと同じ位置
-                font_size=12,
-                color='white',
-                viewport=True
+            # Setup plotter with appropriate settings
+            print("🎨 Creating plotter...")
+            self.plotter = pv.Plotter(
+                window_size=(1200, 800), 
+                off_screen=not interactive_mode,
+                title="SimPyROS Process-Separated PyVista"
             )
+            print("✅ Plotter created successfully")
             
-            # 標準PyVistaと同じ座標軸設定（デフォルトは非表示、ユーザー切り替え可能）
-            # plotter.add_axes()  # デフォルトは非表示（標準PyVistaと同じ）
+            print("🔧 Adding axes...")
+            self.plotter.add_axes()
+            print("✅ Axes added")
             
-            # グリッド表示は無効（標準PyVistaと同じ）
-            # plotter.show_grid()  # 標準PyVistaでは無効
+            print(f"🚀 PyVista可視化プロセス開始 ({'Interactive' if interactive_mode else 'Headless'} mode)")
             
-            # ウィンドウを表示（ノンブロッキングモード）
-            plotter.show(
-                auto_close=False, 
-                interactive_update=True
-            )
+            # Connect to shared memory
+            self.shm = shared_memory.SharedMemory(name=self.shm_name)
             
-            self.running = True
-            print("✅ PyVista初期化完了")
-            print("🖥️ ウィンドウ表示開始")
+            # Setup initial scene
+            self._setup_scene()
             
-            # メインループ
-            update_interval = 1.0 / self.config.update_frequency
-            last_update_time = time.time()
+            # Start main loop
+            self._main_loop()
             
-            while self.running:
-                current_time = time.time()
-                
-                try:
-                    # 更新確認
-                    current_counter = struct.unpack_from('q', shm.buf, 8)[0]
-                    
-                    if current_counter > last_update_counter:
-                        # データ更新あり
-                        self._update_visualization(shm, plotter, robot_actors)
-                        # 時間表示更新（標準PyVistaと同等）
-                        self._update_time_display(shm, time_text_actor)
-                        last_update_counter = current_counter
-                        last_update_time = current_time
-                        
-                        # レンダリング
-                        plotter.render()
-                    
-                    # 適度な頻度で更新
-                    if current_time - last_update_time >= update_interval:
-                        plotter.render()
-                        plotter.update()
-                        last_update_time = current_time
-                    
-                    # CPU使用率制御
-                    time.sleep(0.016)  # ~60 FPS
-                    
-                except KeyboardInterrupt:
-                    print("🛑 KeyboardInterrupt受信")
-                    break
-                except Exception as e:
-                    print(f"⚠️ 可視化ループエラー: {e}")
-                    # ウィンドウが閉じられた場合の検出
-                    if "VTK" in str(e) or "render" in str(e).lower():
-                        print("🪟 ウィンドウが閉じられました")
-                        break
-                    time.sleep(0.1)
-            
-            plotter.close()
-            shm.close()
-            
+        except ImportError as e:
+            print(f"❌ PyVista not available in visualization process: {e}")
+            import traceback
+            traceback.print_exc()
         except Exception as e:
             print(f"❌ PyVista可視化プロセスエラー: {e}")
             import traceback
             traceback.print_exc()
-        
-        print("🛑 PyVista可視化プロセス終了")
-    
-    def _update_visualization(self, shm, plotter, robot_actors):
-        """可視化更新"""
-        # すべてのロボットをチェック
-        for robot_id in range(self.config.max_robots):
-            robot_data = self._get_robot_data_from_shm(shm, robot_id)
+        finally:
+            print(f"🛑 PyVista可視化プロセス終了 (PID: {os.getpid()})")
             
-            if robot_data:
-                robot_name = robot_data['robot_name']
-                transforms = robot_data['transforms']
+    def _setup_scene(self):
+        """Setup initial PyVista scene"""
+        print("🎨 Setting up PyVista scene...")
+        
+        # Add ground plane
+        plane = self.pv.Plane(i_size=10, j_size=10)
+        self.plotter.add_mesh(plane, color='lightgray', opacity=0.3)
+        print("✅ Ground plane added")
+        
+        # Set camera
+        self.plotter.camera_position = [(5, 5, 5), (0, 0, 0), (0, 0, 1)]
+        print("✅ Camera position set")
+        
+    def _main_loop(self):
+        """Main visualization update loop"""
+        # Check if we're in interactive mode
+        display = os.environ.get('DISPLAY', '')
+        interactive_mode = bool(display and display != '')
+        
+        if interactive_mode:
+            # Interactive mode - show window and keep updating
+            print("📺 Opening interactive PyVista window...")
+            print(f"   Window size: {self.plotter.window_size}")
+            print(f"   OFF_SCREEN: {self.pv.OFF_SCREEN}")
+            
+            try:
+                self.plotter.show(auto_close=False, interactive_update=True, interactive=True)
+                print("✅ Interactive window opened successfully")
+            except Exception as e:
+                print(f"❌ Failed to open interactive window: {e}")
+                import traceback
+                traceback.print_exc()
+                return
+            
+            # Keep the window alive and update in background
+            import threading
+            
+            def update_loop():
+                while True:
+                    try:
+                        # Check for new robot geometry
+                        self._process_geometry_queue()
+                        
+                        # Update robot poses from shared memory
+                        self._update_robot_poses()
+                        
+                        # Update visualization
+                        if hasattr(self.plotter, 'render'):
+                            self.plotter.render()
+                        self.frame_count += 1
+                        
+                        # Control frame rate
+                        time.sleep(1.0 / self.config.update_frequency)
+                        
+                    except KeyboardInterrupt:
+                        break
+                    except Exception as e:
+                        print(f"⚠️ Visualization loop error: {e}")
+                        time.sleep(0.1)
+            
+            # Start update thread
+            update_thread = threading.Thread(target=update_loop, daemon=True)
+            update_thread.start()
+            
+            # Keep main thread alive for window interaction
+            try:
+                while True:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                pass
                 
-                # ロボットがまだ追加されていない場合
-                if robot_name not in robot_actors:
-                    self._add_robot_to_scene(plotter, robot_actors, robot_name, len(transforms))
-                
-                # 変換行列を更新
-                self._update_robot_transforms(plotter, robot_actors, robot_name, transforms)
-    
-    def _get_robot_data_from_shm(self, shm, robot_id: int) -> Optional[Dict]:
-        """共有メモリからロボットデータを取得"""
-        robots_offset = 5 * 8  # header size (updated for timing info)
-        robot_size = (
-            8 +  # robot_id
-            8 +  # num_links
-            8 +  # timestamp  
-            8 +  # dirty_flag
-            self.config.max_links_per_robot * self.config.transform_size * 8 +  # transforms
-            256  # robot_name
-        )
-        
-        robot_offset = robots_offset + (robot_id * robot_size)
-        
-        try:
-            # ヘッダー読み取り
-            stored_robot_id = struct.unpack_from('q', shm.buf, robot_offset)[0]
-            if stored_robot_id != robot_id:
-                return None
-                
-            num_links = struct.unpack_from('q', shm.buf, robot_offset + 8)[0]
-            if num_links <= 0:
-                return None
-                
-            timestamp = struct.unpack_from('d', shm.buf, robot_offset + 16)[0]
-            dirty_flag = struct.unpack_from('q', shm.buf, robot_offset + 24)[0]
-            
-            if dirty_flag == 0:
-                return None  # データ更新なし
-            
-            # robot_name読み取り
-            name_bytes = bytes(shm.buf[robot_offset + 32:robot_offset + 32 + 256])
-            robot_name = name_bytes.split(b'\x00')[0].decode('utf-8')
-            
-            if not robot_name:
-                return None
-            
-            # transforms読み取り
-            transforms_offset = robot_offset + 32 + 256
-            transforms_data = []
-            
-            for i in range(int(num_links)):
-                transform = np.eye(4)  # デフォルト単位行列
-                for row in range(4):
-                    for col in range(4):
-                        idx = i * 16 + row * 4 + col
-                        offset = transforms_offset + (idx * 8)
-                        if offset + 8 <= len(shm.buf):
-                            try:
-                                value = struct.unpack_from('d', shm.buf, offset)[0]
-                                transform[row, col] = value
-                            except:
-                                pass
-                transforms_data.append(transform)
-            
-            # dirty flagをクリア
-            struct.pack_into('q', shm.buf, robot_offset + 24, 0)
-            
-            return {
-                'robot_id': robot_id,
-                'robot_name': robot_name,
-                'num_links': int(num_links),
-                'transforms': transforms_data,
-                'timestamp': timestamp
-            }
-            
-        except Exception as e:
-            return None
-    
-    def _update_time_display(self, shm, time_text_actor):
-        """Update time display identical to standard PyVista"""
-        try:
-            # Read timing info from shared memory header
-            sim_time = struct.unpack_from('d', shm.buf, 24)[0]  # offset 24
-            real_time = struct.unpack_from('d', shm.buf, 32)[0]  # offset 32
-            
-            # Calculate speed (same as standard PyVista)
-            if real_time > 0:
-                speed = sim_time / real_time
-                speed_text = f"{speed:.1f}x"
-            else:
-                speed_text = "1.0x"
-            
-            # Format identical to standard PyVista
-            time_text = f"Sim: {sim_time:.1f}s | Real: {real_time:.1f}s | Speed: {speed_text}"
-            
-            # Update the text actor
-            time_text_actor.SetInput(time_text)
-            
-        except Exception as e:
-            # Fallback display
-            time_text_actor.SetInput("Time: N/A")
-    
-    def _add_robot_to_scene(self, plotter, robot_actors, robot_name: str, num_links: int):
-        """ロボットをシーンに追加（標準PyVistaと同等の表示）"""
-        import pyvista as pv
-        
-        robot_actors[robot_name] = []
-        
-        print(f"🤖 Robot '{robot_name}' added to scene ({num_links} links) - unified display")
-        
-        for i in range(num_links):
-            # Create robot geometry identical to standard PyVista URDFLoader output
-            # Use consistent colors and shapes based on URDF common patterns
-            if i == 0:
-                # Base link - typically larger box/cylinder for mobile robots
-                link_mesh = pv.Box(bounds=[-0.15, 0.15, -0.15, 0.15, -0.05, 0.05])
-                default_color = (0.8, 0.4, 0.2)  # Orange (matches standard PyVista URDF defaults)
-            elif i <= 2:  
-                # Arm joints - cylinders for revolute joints
-                link_mesh = pv.Cylinder(radius=0.04, height=0.25, direction=(0, 0, 1))
-                default_color = (0.2, 0.8, 0.4)  # Green (matches standard PyVista URDF defaults)
-            elif i <= 4:
-                # Upper arm/forearm - longer boxes
-                link_mesh = pv.Box(bounds=[-0.02, 0.02, -0.02, 0.02, -0.12, 0.12])
-                default_color = (0.4, 0.2, 0.8)  # Purple (matches standard PyVista URDF defaults)
-            else:
-                # End effector/gripper - smaller spheres
-                link_mesh = pv.Sphere(radius=0.06)
-                default_color = (0.6, 0.6, 0.6)  # Gray (matches standard PyVista URDF defaults)
-            
-            # Rendering settings identical to standard PyVista URDF loader
-            actor = plotter.add_mesh(
-                link_mesh,
-                color=default_color,
-                opacity=1.0,  # Opaque (same as standard PyVista URDF)
-                show_edges=False,  # No edges (same as standard PyVista URDF) 
-                metallic=0.0,  # Non-metallic (same as standard PyVista URDF)
-                roughness=0.5,  # Medium roughness (same as standard PyVista URDF)
-                name=f"{robot_name}_link_{i}"
-            )
-            
-            robot_actors[robot_name].append({
-                'actor': actor,
-                'mesh': link_mesh
-            })
-        
-        print(f"🤖 ロボット追加: {robot_name} ({num_links} links)")
-    
-    def _update_robot_transforms(self, plotter, robot_actors, robot_name: str, transforms: List[np.ndarray]):
-        """ロボットの変換行列を更新"""
-        if robot_name not in robot_actors:
-            return
-        
-        actors = robot_actors[robot_name]
-        
-        for i, (transform, actor_info) in enumerate(zip(transforms, actors)):
-            if i < len(actors):
+        else:
+            # Headless mode - simple loop
+            print("💻 Headless visualization loop")
+            while True:
                 try:
-                    # メッシュを変換
-                    mesh = actor_info['mesh'].copy()
-                    mesh.transform(transform, inplace=True)
+                    # Check for new robot geometry
+                    self._process_geometry_queue()
                     
-                    # アクターを更新
-                    plotter.remove_actor(actor_info['actor'])
+                    # Update robot poses from shared memory
+                    self._update_robot_poses()
                     
-                    color = [0.7, 0.3, 0.3] if i % 2 == 0 else [0.3, 0.7, 0.3]
-                    new_actor = plotter.add_mesh(
-                        mesh,
-                        color=color,
-                        opacity=0.8,
-                        show_edges=True
-                    )
+                    # Render offscreen
+                    self.plotter.render()
+                    self.frame_count += 1
                     
-                    actor_info['actor'] = new_actor
+                    # Control frame rate
+                    time.sleep(1.0 / self.config.update_frequency)
                     
+                except KeyboardInterrupt:
+                    break
                 except Exception as e:
-                    print(f"⚠️ Transform update error for {robot_name} link {i}: {e}")
-    
-    def stop(self):
-        """可視化プロセス停止"""
-        self.running = False
+                    print(f"⚠️ Visualization loop error: {e}")
+                    time.sleep(0.1)
+                    
+        self.plotter.close()
+        
+    def _process_geometry_queue(self):
+        """Process robot geometry from queue"""
+        try:
+            while not self.geometry_queue.empty():
+                geometry_data: RobotGeometryData = self.geometry_queue.get_nowait()
+                self._load_robot_geometry(geometry_data)
+        except:
+            pass  # Queue empty
+            
+    def _load_robot_geometry(self, geometry_data: RobotGeometryData):
+        """Load robot geometry using extracted data with URDFRobotVisualizer logic"""
+        robot_name = geometry_data.robot_name
+        links_data = geometry_data.links_data
+        urdf_links_data = geometry_data.urdf_links_data
+        
+        print(f"🎨 Loading geometry for robot: {robot_name} using URDFRobotVisualizer logic")
+        
+        # Use the exact same logic as URDFRobotVisualizer._create_robot_link_actors_from_robot
+        actors = {}
+        initial_meshes = {}
+        
+        for link_name, link_data in links_data.items():
+            # Create mesh based on geometry type (same as URDFRobotVisualizer)
+            mesh = None
+            geometry_type = link_data.get('geometry_type', 'box')
+            geometry_params = link_data.get('geometry_params', {})
+            color = link_data.get('color', [0.6, 0.6, 0.6, 1.0])
+            
+            print(f"  🔧 Creating {geometry_type} mesh for {link_name}")
+            print(f"      Params: {geometry_params}")
+            print(f"      Color: {color}")
+            
+            if geometry_type == "box":
+                size = geometry_params.get('size', [0.3, 0.3, 0.1])
+                mesh = self.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
+                
+            elif geometry_type == "cylinder":
+                radius = geometry_params.get('radius', 0.05)
+                length = geometry_params.get('length', 0.35)
+                # Use same parameters as URDFRobotVisualizer
+                mesh = self.pv.Cylinder(radius=radius, height=length, direction=(0, 0, 1))
+                
+            elif geometry_type == "sphere":
+                radius = geometry_params.get('radius', 0.08)
+                mesh = self.pv.Sphere(radius=radius)
+            
+            if mesh is not None:
+                # Store original mesh before any transforms
+                original_mesh = mesh.copy()
+                
+                # Apply visual origin transformation from URDF data (same as URDFRobotVisualizer)
+                if link_name in urdf_links_data and urdf_links_data[link_name].get('has_pose', False):
+                    urdf_link_data = urdf_links_data[link_name]
+                    position = np.array(urdf_link_data['position'])
+                    quaternion = np.array(urdf_link_data['quaternion'])
+                    
+                    # Recreate Pose and transform matrix
+                    from core.simulation_object import Pose
+                    pose = Pose.from_position_quaternion(position, quaternion)
+                    transform_matrix = pose.to_transformation_matrix()
+                    original_mesh.transform(transform_matrix, inplace=True)
+                    print(f"      🔧 Applied visual origin to {link_name}: pos={position}")
+                
+                # Use color from extracted link data (same as URDFRobotVisualizer)
+                color_rgb = color[:3] if len(color) >= 3 else (0.6, 0.6, 0.6)
+                print(f"      🎨 Using link color for {link_name}: {color_rgb}")
+                
+                # Add to plotter (same as URDFRobotVisualizer)
+                display_mesh = original_mesh.copy()
+                actor = self.plotter.add_mesh(
+                    display_mesh, 
+                    color=color_rgb,
+                    opacity=1.0,
+                    name=f"{robot_name}_{link_name}"
+                )
+                
+                # Store both actor and initial mesh
+                actors[link_name] = actor
+                initial_meshes[link_name] = original_mesh
+                
+                print(f"  ✅ Created {geometry_type} mesh for link: {link_name} with color {color_rgb}")
+        
+        self.robot_actors[robot_name] = actors
+        self.robot_initial_meshes[robot_name] = initial_meshes
+        self.robots[robot_name] = geometry_data
+        print(f"✅ Robot geometry loaded: {robot_name} ({len(actors)} links)")
+        
+    def _update_robot_poses(self):
+        """Update robot poses from shared memory"""
+        try:
+            # Read header
+            header_data = struct.unpack('QQd', self.shm.buf[0:24])
+            num_robots, update_counter, timestamp = header_data
+            
+            robots_offset = 24
+            
+            for robot_id in range(int(num_robots)):
+                robot_offset = robots_offset + (robot_id * self._get_robot_data_size())
+                
+                # Read robot data
+                robot_header = struct.unpack('QQQ', self.shm.buf[robot_offset:robot_offset + 24])
+                robot_id_read, num_links, dirty_flag = robot_header
+                
+                if dirty_flag == 0:
+                    continue  # No update needed
+                
+                # Read robot name
+                name_offset = robot_offset + 24 + (self.config.max_links_per_robot * 7 * 8)
+                name_bytes = bytes(self.shm.buf[name_offset:name_offset + 64])
+                robot_name = name_bytes.decode('utf-8').rstrip('\x00')
+                
+                if robot_name not in self.robot_actors:
+                    continue
+                
+                # Read pose data
+                pose_offset = robot_offset + 24
+                pose_data = struct.unpack(
+                    f'{self.config.max_links_per_robot * 7}d',
+                    self.shm.buf[pose_offset:pose_offset + self.config.max_links_per_robot * 7 * 8]
+                )
+                
+                # Update actor positions
+                actors = self.robot_actors[robot_name]
+                initial_meshes = self.robot_initial_meshes.get(robot_name, {})
+                link_names = sorted(actors.keys())
+                
+                for i, link_name in enumerate(link_names[:int(num_links)]):
+                    if link_name in actors and link_name in initial_meshes:
+                        base_idx = i * 7
+                        x, y, z = pose_data[base_idx:base_idx + 3]
+                        qw, qx, qy, qz = pose_data[base_idx + 3:base_idx + 7]  # [w, x, y, z]
+                        
+                        # Get actor and initial mesh
+                        actor = actors[link_name]
+                        initial_mesh = initial_meshes[link_name]
+                        
+                        # Create new mesh from initial state
+                        new_mesh = initial_mesh.copy()
+                        
+                        # Apply current pose transformation
+                        from scipy.spatial.transform import Rotation
+                        if qw != 0 or qx != 0 or qy != 0 or qz != 0:  # Valid quaternion
+                            # Convert quaternion [w, x, y, z] to scipy format [x, y, z, w]
+                            rotation = Rotation.from_quat([qx, qy, qz, qw])
+                            rotation_matrix = rotation.as_matrix()
+                            
+                            # Create 4x4 transform matrix
+                            transform = np.eye(4)
+                            transform[:3, :3] = rotation_matrix
+                            transform[:3, 3] = [x, y, z]
+                            
+                            # Apply transform to new mesh (from initial state)
+                            new_mesh.transform(transform)
+                        else:
+                            # No rotation, just translation
+                            transform = np.eye(4)
+                            transform[:3, 3] = [x, y, z]
+                            new_mesh.transform(transform)
+                        
+                        # Update actor with new mesh
+                        if hasattr(actor, 'GetMapper') and hasattr(actor.GetMapper(), 'GetInput'):
+                            # Replace the mesh data in the actor
+                            current_mesh = actor.GetMapper().GetInput()
+                            if hasattr(current_mesh, 'copy_from'):
+                                current_mesh.copy_from(new_mesh)
+                            elif hasattr(current_mesh, 'DeepCopy'):
+                                current_mesh.DeepCopy(new_mesh)
+                            else:
+                                # Fallback: remove and re-add actor
+                                self.plotter.remove_actor(actor)
+                                # Use default color since we don't have geometry_data here
+                                color = 'blue'
+                                new_actor = self.plotter.add_mesh(
+                                    new_mesh,
+                                    color=color,
+                                    opacity=0.8,
+                                    name=f"{robot_name}_{link_name}"
+                                )
+                                actors[link_name] = new_actor
+                        
+        except Exception as e:
+            print(f"⚠️ Pose update error: {e}")
+            
+    def _get_robot_data_size(self):
+        """Get size of robot data in shared memory"""
+        return (
+            8 +  # robot_id
+            8 +  # num_links  
+            8 +  # dirty_flag
+            self.config.max_links_per_robot * 7 * 8 +  # link poses
+            64   # robot_name
+        )
 
 
 class ProcessSeparatedPyVistaVisualizer:
     """
-    プロセス分離PyVistaビジュアライザーのメインクラス
+    Process-separated PyVista visualizer with optimized data flow
     
-    SimPyシミュレーション側で使用
+    Features:
+    1. One-time geometry transfer via Queue
+    2. Continuous pose updates via shared memory
+    3. Standard PyVista logic compatibility
     """
     
     def __init__(self, config: Optional[SharedMemoryConfig] = None):
         self.config = config or SharedMemoryConfig()
-        self.shm_manager = None
-        self.viz_process = None
-        self.available = False
         
-        # パフォーマンス統計
-        self.performance_stats = {
-            'update_count': 0,
-            'last_update_time': 0.0,
-            'avg_update_time': 0.0,
-            'start_time': time.time(),
-            'total_robots': 0
-        }
+        # Communication channels
+        self.geometry_queue = Queue()
+        self.pose_manager = None
+        self.viz_process = None
+        
+        # State tracking
+        self.robots = {}
+        self.is_initialized = False
+        self.available = True  # For compatibility
         
     def initialize(self) -> bool:
-        """ビジュアライザーを初期化"""
+        """Initialize the process-separated visualizer"""
         try:
-            # 共有メモリマネージャー初期化
-            self.shm_manager = SharedMemoryManager(self.config)
+            print("🚀 Initializing ProcessSeparatedPyVistaVisualizer...")
             
-            # PyVista可視化プロセス開始（共有メモリ名を引数で渡す）
+            # Create shared memory for poses
+            print("💾 Creating shared memory...")
+            self.pose_manager = PoseSharedMemoryManager(self.config)
+            print(f"✅ Shared memory created: {self.pose_manager.shm_name}")
+            
+            # Start visualization process
+            print("🚀 Starting visualization process...")
             self.viz_process = mp.Process(
                 target=self._run_visualization_process,
-                args=(self.shm_manager.shm_name,)
+                args=(self.config, self.pose_manager.shm_name, self.geometry_queue)
             )
             self.viz_process.start()
+            print(f"✅ Visualization process started (PID: {self.viz_process.pid})")
             
-            # 少し待って初期化完了を確認
-            time.sleep(2.0)  # より長い初期化時間
+            # Wait for process to start and check if it's alive
+            time.sleep(2.0)  # Give more time for startup
             
             if self.viz_process.is_alive():
-                self.available = True
-                print("✅ プロセス分離PyVistaビジュアライザー初期化完了")
+                print(f"✅ Visualization process is running (PID: {self.viz_process.pid})")
+                self.is_initialized = True
+                print("✅ ProcessSeparatedPyVistaVisualizer 初期化完了")
                 return True
             else:
-                print("❌ PyVista可視化プロセス開始失敗")
+                print(f"❌ Visualization process died (exit code: {self.viz_process.exitcode})")
                 return False
-                
+            
         except Exception as e:
             print(f"❌ 初期化失敗: {e}")
-            return False
-    
-    def _run_visualization_process(self, shm_name: str):
-        """可視化プロセス実行"""
-        try:
-            print(f"🔧 プロセス分離PyVista開始 (PID: {os.getpid()})")
-            print(f"   共有メモリ名: {shm_name}")
-            print(f"   DISPLAY: {os.environ.get('DISPLAY', 'Not set')}")
-            
-            viz = PyVistaVisualizationProcess(self.config, shm_name)
-            viz.run()
-        except Exception as e:
-            print(f"❌ 可視化プロセス実行エラー: {e}")
             import traceback
             traceback.print_exc()
-    
-    def add_robot(self, robot_name: str, num_links: int) -> bool:
-        """ロボットを追加"""
-        if not self.available or not self.shm_manager:
-            return False
-        
-        try:
-            robot_id = self.shm_manager.register_robot(robot_name, num_links)
-            self.performance_stats['total_robots'] += 1
-            return True
-        except Exception as e:
-            print(f"❌ ロボット追加失敗: {e}")
             return False
     
-    def add_robot_with_urdf(self, robot_name: str, urdf_data: Dict) -> bool:
-        """URDFデータ付きでロボットを追加"""
-        if not self.available or not self.shm_manager:
+    def add_robot(self, robot_name: str, robot_instance: Any) -> bool:
+        """Add robot with geometry and pose data"""
+        if not self.is_initialized:
             return False
-        
+            
         try:
-            # リンク数を取得
-            num_links = len(urdf_data.get('links', {}))
+            # Extract comprehensive robot data to replicate URDFRobotVisualizer logic
+            links_data = {}
+            urdf_links_data = {}
             
-            # 基本的なロボット追加
-            robot_id = self.shm_manager.register_robot(robot_name, num_links)
-            self.performance_stats['total_robots'] += 1
+            if hasattr(robot_instance, 'links'):
+                for link_name, link_obj in robot_instance.links.items():
+                    # Extract all data needed for URDFRobotVisualizer logic
+                    links_data[link_name] = {
+                        'geometry_type': getattr(link_obj, 'geometry_type', 'box'),
+                        'geometry_params': getattr(link_obj, 'geometry_params', {}),
+                        'color': getattr(link_obj, 'color', [0.6, 0.6, 0.6, 1.0])  # This is the key!
+                    }
+                    
+                    print(f"  📋 Extracted {link_name}: {links_data[link_name]}")
             
-            print(f"🤖 Robot '{robot_name}' added with URDF data ({num_links} links)")
+            # Extract URDF visual origin data
+            if hasattr(robot_instance, 'urdf_loader') and robot_instance.urdf_loader:
+                urdf_loader = robot_instance.urdf_loader
+                if hasattr(urdf_loader, 'links'):
+                    for link_name, urdf_link_info in urdf_loader.links.items():
+                        if hasattr(urdf_link_info, 'pose') and urdf_link_info.pose is not None:
+                            # Store pose data for visual origin transformation
+                            pose = urdf_link_info.pose
+                            urdf_links_data[link_name] = {
+                                'has_pose': True,
+                                'position': pose.position.tolist() if hasattr(pose.position, 'tolist') else list(pose.position),
+                                'quaternion': pose.quaternion.tolist() if hasattr(pose.quaternion, 'tolist') else list(pose.quaternion)
+                            }
+                            print(f"  🔧 URDF visual origin for {link_name}: {urdf_links_data[link_name]}")
+                        else:
+                            urdf_links_data[link_name] = {'has_pose': False}
             
-            # URDFデータをPyVistaプロセスに転送（今後の改善で実装）
-            # TODO: 共有メモリにURDFデータを保存
+            # Send comprehensive geometry data
+            geometry_data = RobotGeometryData(
+                robot_name=robot_name,
+                links_data=links_data,
+                urdf_links_data=urdf_links_data,
+                initial_pose=robot_instance.pose if hasattr(robot_instance, 'pose') else Pose(),
+                timestamp=time.time()
+            )
+            self.geometry_queue.put(geometry_data)
             
-            return True
+            # Register robot for pose updates
+            if hasattr(robot_instance, 'links'):
+                num_links = len(robot_instance.links)
+            else:
+                num_links = 1
                 
-        except Exception as e:
-            print(f"❌ URDF robot addition error: {e}")
-            return False
-    
-    def update_robot_transforms(self, robot_name: str, transforms: List[np.ndarray]) -> bool:
-        """ロボットの変換行列を更新"""
-        if not self.available or not self.shm_manager:
-            return False
-        
-        start_time = time.time()
-        
-        try:
-            # numpy配列に変換
-            transforms_array = np.array(transforms)
+            self.pose_manager.register_robot(robot_name, num_links)
+            self.robots[robot_name] = robot_instance
             
-            success = self.shm_manager.update_robot_transforms(robot_name, transforms_array)
-            
-            if success:
-                # パフォーマンス統計更新
-                update_time = time.time() - start_time
-                self.performance_stats['update_count'] += 1
-                self.performance_stats['last_update_time'] = update_time
-                
-                # 平均更新時間
-                count = self.performance_stats['update_count']
-                if count > 1:
-                    old_avg = self.performance_stats['avg_update_time']
-                    self.performance_stats['avg_update_time'] = old_avg + (update_time - old_avg) / count
-                else:
-                    self.performance_stats['avg_update_time'] = update_time
-            
-            return success
+            print(f"✅ Robot added: {robot_name}")
+            return True
             
         except Exception as e:
-            print(f"❌ Transform更新失敗: {e}")
+            print(f"❌ Robot add failed: {e}")
             return False
     
-    def get_performance_stats(self) -> Dict:
-        """パフォーマンス統計を取得"""
-        total_time = time.time() - self.performance_stats['start_time']
-        
-        stats = self.performance_stats.copy()
-        stats['total_time'] = total_time
-        stats['avg_update_rate'] = self.performance_stats['update_count'] / total_time if total_time > 0 else 0
-        stats['process_separated'] = True
-        stats['shared_memory_size'] = self.shm_manager.shm_size if self.shm_manager else 0
-        
-        return stats
-    
-    def print_performance_summary(self):
-        """パフォーマンス概要を表示"""
-        stats = self.get_performance_stats()
-        
-        print(f"\n📊 Process-Separated PyVista Performance Summary")
-        print("=" * 50)
-        print(f"Total time: {stats['total_time']:.1f}s")
-        print(f"Update count: {stats['update_count']}")
-        print(f"Total robots: {stats['total_robots']}")
-        print(f"Avg update rate: {stats['avg_update_rate']:.1f} Hz")
-        print(f"Avg update time: {stats['avg_update_time']:.4f}s")
-        print(f"Shared memory size: {stats['shared_memory_size']} bytes")
-        print(f"Process separation: ✅ ENABLED")
+    def update_robot_poses(self, robot_name: str, link_poses: Dict[str, Pose]) -> bool:
+        """Update robot link poses (high-frequency)"""
+        if not self.is_initialized or robot_name not in self.robots:
+            return False
+            
+        return self.pose_manager.update_robot_poses(robot_name, link_poses)
     
     def shutdown(self):
-        """ビジュアライザーをシャットダウン"""
-        try:
-            if self.viz_process and self.viz_process.is_alive():
-                self.viz_process.terminate()
-                self.viz_process.join(timeout=5.0)
-                
-                if self.viz_process.is_alive():
-                    self.viz_process.kill()
-                    
-            if self.shm_manager:
-                self.shm_manager.cleanup()
-                
-            print("🛑 プロセス分離PyVistaビジュアライザーシャットダウン完了")
+        """Shutdown the visualizer"""
+        if self.viz_process and self.viz_process.is_alive():
+            self.viz_process.terminate()
+            self.viz_process.join(timeout=2.0)
             
+        if self.pose_manager:
+            self.pose_manager.cleanup()
+            
+        print("🛑 ProcessSeparatedPyVistaVisualizer 終了")
+    
+    @staticmethod
+    def _run_visualization_process(config: SharedMemoryConfig, shm_name: str, geometry_queue: Queue):
+        """Static method to run visualization process"""
+        print(f"🚀 Starting PyVista visualization process (PID: {os.getpid()})")
+        print(f"   DISPLAY: {os.environ.get('DISPLAY', 'NOT_SET')}")
+        print(f"   Shared memory: {shm_name}")
+        
+        try:
+            viz = PyVistaVisualizationProcess(config, shm_name, geometry_queue)
+            viz.run()
         except Exception as e:
-            print(f"⚠️ シャットダウンエラー: {e}")
+            print(f"❌ Visualization process failed: {e}")
+            import traceback
+            traceback.print_exc()
 
 
-def create_process_separated_visualizer(max_robots: int = 10, max_links_per_robot: int = 20) -> ProcessSeparatedPyVistaVisualizer:
-    """プロセス分離PyVistaビジュアライザーを作成"""
-    config = SharedMemoryConfig(
-        max_robots=max_robots,
-        max_links_per_robot=max_links_per_robot,
-        update_frequency=30.0
-    )
-    
-    visualizer = ProcessSeparatedPyVistaVisualizer(config)
-    
-    if visualizer.initialize():
-        return visualizer
-    else:
-        raise RuntimeError("プロセス分離PyVistaビジュアライザー初期化失敗")
+def create_process_separated_visualizer(config: Optional[SharedMemoryConfig] = None):
+    """Factory function to create the visualizer"""
+    return ProcessSeparatedPyVistaVisualizer(config)
 
 
 if __name__ == "__main__":
-    print("🧪 プロセス分離PyVistaビジュアライザーテスト")
-    print("=" * 50)
+    # Test the visualizer
+    config = SharedMemoryConfig(max_robots=3, max_links_per_robot=10)
+    visualizer = ProcessSeparatedPyVistaVisualizer(config)
     
-    try:
-        # ビジュアライザー作成
-        visualizer = create_process_separated_visualizer(max_robots=2, max_links_per_robot=5)
-        
-        # テストロボット追加
-        visualizer.add_robot("test_robot", 3)
-        
-        print("🤖 テストロボット追加完了")
-        print("🚀 5秒間のアニメーションテスト開始...")
-        
-        # アニメーションテスト
-        start_time = time.time()
-        duration = 5.0
-        
-        while time.time() - start_time < duration:
-            t = time.time() - start_time
-            
-            # テスト用変換行列生成
-            transforms = []
-            for i in range(3):
-                transform = np.eye(4)
-                transform[0, 3] = i * 0.2  # X offset
-                transform[1, 3] = 0.1 * np.sin(t * 2.0 + i)  # Y motion
-                transform[2, 3] = 0.05 * np.cos(t * 1.5 + i)  # Z motion
-                
-                # 回転
-                angle = t * 0.5 + i * np.pi / 3
-                transform[0, 0] = np.cos(angle)
-                transform[0, 1] = -np.sin(angle)
-                transform[1, 0] = np.sin(angle)
-                transform[1, 1] = np.cos(angle)
-                
-                transforms.append(transform)
-            
-            # 更新
-            visualizer.update_robot_transforms("test_robot", transforms)
-            
-            time.sleep(1.0 / 60.0)  # 60 FPS
-        
-        print("✅ アニメーションテスト完了")
-        
-        # パフォーマンス統計表示
-        visualizer.print_performance_summary()
-        
-        print("\n💡 Process-Separated PyVista Benefits:")
-        print("   ✅ 完全なプロセス分離 - SimPyに影響しない")
-        print("   ✅ 共有メモリ - 高速データ転送")
-        print("   ✅ クラッシュ分離 - PyVistaエラーが伝播しない")
-        print("   ✅ 独立したOpenGLコンテキスト")
-        print("   ✅ Non-blocking updates")
-        
-        # 少し待ってからシャットダウン
-        print("\n5秒後にシャットダウンします...")
+    if visualizer.initialize():
+        print("🧪 Test mode - visualizer initialized")
         time.sleep(5.0)
-        
-    except KeyboardInterrupt:
-        print("\n⏹️ ユーザー割り込み")
-    except Exception as e:
-        print(f"\n❌ テスト失敗: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        try:
-            visualizer.shutdown()
-        except:
-            pass
+        visualizer.shutdown()
+    else:
+        print("❌ Test failed - initialization error")
