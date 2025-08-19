@@ -47,7 +47,7 @@ DEBUG_MINIMAL = DEBUG_LEVEL in ['1', '2']
 DEBUG_VERBOSE = DEBUG_LEVEL == '2'
 
 
-def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0):
+def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0, enable_monitor=False):
     """Example 1: Simple joint control with auto-close
     
     This example demonstrates basic robot joint control using the simplified SimulationManager interface.
@@ -72,7 +72,8 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         visualization=visualization,
         visualization_backend=visualization_backend,
         update_rate=30.0,  # Optimized update rate for better real-time performance
-        enable_frequency_grouping=False  # Disable frequency grouping to test individual processes
+        enable_frequency_grouping=False,  # Disable frequency grouping to test individual processes
+        enable_monitor=enable_monitor  # Control monitor window creation
     )
     sim = SimulationManager(config)
     
@@ -604,6 +605,8 @@ def main():
                        help='Enable frequency grouping optimization for performance demo')
     parser.add_argument('--duration', type=float, default=5.0,
                        help='Simulation duration in seconds (default: 5.0)')
+    parser.add_argument('--enable-monitor', action='store_true',
+                       help='Enable simulation monitor window (may cause X11 issues)')
     
     args = parser.parse_args()
     
@@ -628,7 +631,8 @@ def main():
             visualization=default_visualization,
             real_time_factor=default_real_time_factor,
             visualization_backend=default_visualization_backend,
-            duration=args.duration
+            duration=args.duration,
+            enable_monitor=args.enable_monitor
         )),
         'mobile': ("Mobile Robot", lambda: mobile_robot_example(
             unified_process=True,

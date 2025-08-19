@@ -64,7 +64,7 @@ class SimulationConfig:
     max_links_per_robot: int = 15  # Maximum links per robot for shared memory
     
     # Monitor window settings
-    enable_monitor: bool = True  # Enable simulation monitor window
+    enable_monitor: bool = False  # Enable simulation monitor window (disabled by default due to X11 compatibility)
     monitor_enable_controls: bool = False  # Enable control buttons in monitor
     
     
