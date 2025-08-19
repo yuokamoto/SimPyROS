@@ -34,6 +34,7 @@ from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visua
 from core.meshcat_visualizer import MeshCatURDFRobotVisualizer, create_meshcat_visualizer
 from core.time_manager import TimeManager, set_global_time_manager
 from core.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
+from core.simulation_monitor import create_simulation_monitor
 
 
 @dataclass
@@ -61,6 +62,10 @@ class SimulationConfig:
     # Process-separated PyVista settings
     max_robots: int = 5  # Maximum number of robots for shared memory (デフォルト値を小さく)
     max_links_per_robot: int = 15  # Maximum links per robot for shared memory
+    
+    # Monitor window settings
+    enable_monitor: bool = True  # Enable simulation monitor window
+    monitor_enable_controls: bool = False  # Enable control buttons in monitor
     
     
 class ControlCallback:
@@ -116,7 +121,8 @@ class SimulationManager:
         
         # Core components - use RealtimeEnvironment
         self.time_manager: Optional[TimeManager] = None
-        self.visualizer: Optional[Union[URDFRobotVisualizer, OptimizedURDFRobotVisualizer, MeshCatURDFRobotVisualizer, ProcessSeparatedURDFRobotVisualizer]] = None
+        self.visualizer: Optional[Union[URDFRobotVisualizer, MeshCatURDFRobotVisualizer]] = None
+        self.monitor = None  # Simulation monitor window
         
         # Simulation state
         self.robots: Dict[str, Robot] = {}
@@ -177,6 +183,19 @@ class SimulationManager:
     def env(self) -> simpy.rt.RealtimeEnvironment:
         """Get the SimPy RealtimeEnvironment"""
         return self.time_manager.env if self.time_manager else None
+    
+    def _initialize_monitor(self):
+        """Initialize simulation monitor window if enabled"""
+        if not self.config.enable_monitor or self.monitor is not None:
+            return
+            
+        print("📊 Creating simulation monitor window")
+        backend_name = self.config.visualization_backend if self.config.visualization else 'headless'
+        self.monitor = create_simulation_monitor(
+            title=f"SimPyROS Monitor - {backend_name}",
+            enable_controls=self.config.monitor_enable_controls,
+            control_callback=self._handle_monitor_control if self.config.monitor_enable_controls else None
+        )
     
     def _initialize_visualization(self):
         """Initialize visualization system if enabled"""
@@ -518,6 +537,9 @@ class SimulationManager:
                     except Exception as e:
                         print(f"⚠️ Object visualization update error for {object_name}: {e}")
             
+            # Update monitor window with current data
+            self._update_monitor_data()
+            
             # Yield control back to SimPy
             yield self.env.timeout(dt)
     
@@ -649,6 +671,9 @@ class SimulationManager:
         
         # Start time manager simulation
         self.time_manager.start_simulation()
+        
+        # Initialize monitor window
+        self._initialize_monitor()
         
         # Start visualization process
         if self.config.visualization and self.visualizer and self.visualizer.available:
@@ -982,6 +1007,15 @@ class SimulationManager:
                 print(f"⚠️ Visualization cleanup warning: {e}")
             finally:
                 self.visualizer = None
+        
+        # Clean up monitor window
+        if self.monitor:
+            try:
+                self.monitor.stop()
+            except Exception as e:
+                print(f"⚠️ Monitor cleanup warning: {e}")
+            finally:
+                self.monitor = None
         
         # SimPy processes are automatically cleaned up when environment shuts down
         if self._control_callback_process:
@@ -1378,6 +1412,54 @@ class SimulationManager:
                 
         except Exception as e:
             print(f"⚠️ Could not get timing stats: {e}")
+    
+    def _handle_monitor_control(self, command: str):
+        """Handle control commands from monitor window"""
+        if command == 'toggle_play_pause':
+            self._simulation_paused = not self._simulation_paused
+            print(f"🎮 Monitor control: {'Paused' if self._simulation_paused else 'Resumed'}")
+        elif command == 'reset':
+            self._reset_requested = True
+            print("🎮 Monitor control: Reset requested")
+    
+    def _update_monitor_data(self):
+        """Update monitor window with current simulation data"""
+        if not self.monitor:
+            return
+            
+        try:
+            # Get timing stats
+            timing_stats = self.time_manager.get_timing_stats() if self.time_manager else None
+            
+            # Calculate timing accuracy
+            timing_accuracy = 0.0
+            if timing_stats and timing_stats.real_time_elapsed > 0 and timing_stats.sim_time > 0:
+                actual_factor = timing_stats.sim_time / timing_stats.real_time_elapsed
+                error_percent = abs(actual_factor - timing_stats.real_time_factor) / timing_stats.real_time_factor * 100
+                timing_accuracy = 100.0 - error_percent
+            
+            # Prepare monitor data
+            monitor_data = {
+                'sim_time': timing_stats.sim_time if timing_stats else 0.0,
+                'real_time': timing_stats.real_time_elapsed if timing_stats else 0.0,
+                'target_rt_factor': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
+                'actual_rt_factor': (timing_stats.sim_time / timing_stats.real_time_elapsed) if (timing_stats and timing_stats.real_time_elapsed > 0) else 0.0,
+                'timing_accuracy': max(0.0, timing_accuracy),
+                'update_rate': 1.0 / self.config.time_step,
+                'time_step': self.config.time_step,
+                'visualization': self.config.visualization_backend if self.config.visualization else 'headless',
+                'active_robots': len(self.robots),
+                'active_objects': len(self.objects),
+                'architecture': 'Event-Driven SimPy',
+                'simulation_state': 'paused' if self._simulation_paused else 'running'
+            }
+            
+            # Send data to monitor
+            self.monitor.update_data(monitor_data)
+            
+        except Exception as e:
+            # Silently ignore monitor update errors to avoid disrupting simulation
+            pass
 
 
 # Convenience functions for common use cases
