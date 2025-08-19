@@ -64,7 +64,7 @@ class SimulationConfig:
     max_links_per_robot: int = 15  # Maximum links per robot for shared memory
     
     # Monitor window settings
-    enable_monitor: bool = False  # Enable simulation monitor window (disabled by default due to X11 compatibility)
+    enable_monitor: bool = True  # Enable simulation monitor window (with improved X11 error handling)
     monitor_enable_controls: bool = False  # Enable control buttons in monitor
     
     
@@ -185,17 +185,32 @@ class SimulationManager:
         return self.time_manager.env if self.time_manager else None
     
     def _initialize_monitor(self):
-        """Initialize simulation monitor window if enabled"""
+        """Initialize simulation monitor window if enabled with error handling"""
         if not self.config.enable_monitor or self.monitor is not None:
             return
             
-        print("📊 Creating simulation monitor window")
-        backend_name = self.config.visualization_backend if self.config.visualization else 'headless'
-        self.monitor = create_simulation_monitor(
-            title=f"SimPyROS Monitor - {backend_name}",
-            enable_controls=self.config.monitor_enable_controls,
-            control_callback=self._handle_monitor_control if self.config.monitor_enable_controls else None
-        )
+        try:
+            print("📊 Creating simulation monitor window")
+            backend_name = self.config.visualization_backend if self.config.visualization else 'headless'
+            self.monitor = create_simulation_monitor(
+                title=f"SimPyROS Monitor - {backend_name}",
+                enable_controls=self.config.monitor_enable_controls,
+                control_callback=self._handle_monitor_control if self.config.monitor_enable_controls else None
+            )
+            
+            # Give the monitor a moment to initialize
+            import time
+            time.sleep(0.1)
+            
+            if self.monitor and hasattr(self.monitor, 'running') and self.monitor.running:
+                print("✅ Simulation monitor initialized successfully")
+            else:
+                print("⚠️ Monitor initialization may have failed")
+                
+        except Exception as e:
+            print(f"⚠️ Failed to create monitor window: {e}")
+            print("   Continuing simulation without monitor...")
+            self.monitor = None
     
     def _initialize_visualization(self):
         """Initialize visualization system if enabled"""
@@ -1426,6 +1441,10 @@ class SimulationManager:
         """Update monitor window with current simulation data"""
         if not self.monitor:
             return
+        
+        # Check if monitor is still running
+        if hasattr(self.monitor, 'running') and not self.monitor.running:
+            return
             
         try:
             # Get timing stats
@@ -1454,8 +1473,20 @@ class SimulationManager:
                 'simulation_state': 'paused' if self._simulation_paused else 'running'
             }
             
-            # Send data to monitor
-            self.monitor.update_data(monitor_data)
+            # Send data to monitor with error handling
+            try:
+                self.monitor.update_data(monitor_data)
+            except Exception as monitor_error:
+                # If monitor fails repeatedly, disable it
+                if hasattr(self.monitor, 'x11_error_count'):
+                    self.monitor.x11_error_count += 1
+                    if self.monitor.x11_error_count >= self.monitor.max_x11_errors:
+                        print("⚠️ Monitor experiencing too many errors, disabling...")
+                        try:
+                            self.monitor.stop()
+                        except:
+                            pass
+                        self.monitor = None
             
         except Exception as e:
             # Silently ignore monitor update errors to avoid disrupting simulation
