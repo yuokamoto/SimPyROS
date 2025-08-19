@@ -14,6 +14,8 @@ import signal
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory, Queue
+from core.logger import get_logger, log_info, log_warning
+from core.multiprocessing_cleanup import register_multiprocessing_process, register_multiprocessing_queue
 from typing import Dict, List, Optional, Tuple, Any
 import struct
 import warnings
@@ -49,9 +51,9 @@ class RobotPoseUpdate:
 @dataclass 
 class SharedMemoryConfig:
     """Shared memory configuration for pose updates only"""
-    max_robots: int = 10
-    max_links_per_robot: int = 20
-    update_frequency: float = 30.0  # Hz
+    max_robots: int = 1000
+    max_links_per_robot: int = 100
+    update_frequency: float = 10.0  # Hz
     
     # Data size calculations
     pose_size: int = 7  # x, y, z, qw, qx, qy, qz
@@ -244,6 +246,9 @@ class PyVistaVisualizationProcess:
         self.plotter = None
         self.shm = None
         
+        # Update control
+        self._update_active = False
+        
     def run(self):
         """Main visualization process loop"""
         print(f"🚀 PyVista process starting (PID: {os.getpid()})")
@@ -254,6 +259,13 @@ class PyVistaVisualizationProcess:
             import pyvista as pv
             self.pv = pv  # Store reference for other methods
             print(f"✅ PyVista imported successfully (version: {pv.__version__})")
+            
+            # Debug: Check geometry queue immediately
+            print(f"🔍 Checking initial geometry queue... Queue size: {self.geometry_queue.qsize()}")
+            if not self.geometry_queue.empty():
+                print("📦 Found geometry data in queue at startup!")
+            else:
+                print("📭 Geometry queue is empty at startup")
             
             # Check if we have a display available
             display = os.environ.get('DISPLAY', '')
@@ -303,6 +315,8 @@ class PyVistaVisualizationProcess:
             import traceback
             traceback.print_exc()
         finally:
+            # Stop updates if they're still running
+            self._update_active = False
             print(f"🛑 PyVista可視化プロセス終了 (PID: {os.getpid()})")
             
     def _setup_scene(self):
@@ -314,9 +328,54 @@ class PyVistaVisualizationProcess:
         self.plotter.add_mesh(plane, color='lightgray', opacity=0.3)
         print("✅ Ground plane added")
         
-        # Set camera
+        # Set camera position
         self.plotter.camera_position = [(5, 5, 5), (0, 0, 0), (0, 0, 1)]
         print("✅ Camera position set")
+        
+        # Setup interactive camera controls  
+        self._setup_interactive_camera()
+        
+    def _setup_interactive_camera(self):
+        """Setup interactive camera controls for mouse navigation"""
+        try:
+            print("📷 Setting up interactive camera controls...")
+            
+            # Enable trackball interaction style for better 3D navigation
+            try:
+                self.plotter.enable_trackball_style()
+                print("✅ Trackball style enabled")
+            except Exception as e:
+                print(f"⚠️ Could not enable trackball style: {e}")
+            
+            # Configure camera properties for better interaction
+            try:
+                self.plotter.camera.view_angle = 60  # Field of view
+                self.plotter.camera.clipping_range = (0.1, 1000.0)  # Near/far clipping planes
+                print("✅ Camera properties configured")
+            except Exception as e:
+                print(f"⚠️ Could not set camera properties: {e}")
+            
+            # Enable depth peeling for better transparency
+            try:
+                if hasattr(self.plotter.ren_win, 'SetAlphaBitPlanes'):
+                    self.plotter.ren_win.SetAlphaBitPlanes(1)
+                if hasattr(self.plotter, 'enable_depth_peeling'):
+                    self.plotter.enable_depth_peeling()
+                print("✅ Depth peeling enabled")
+            except Exception as e:
+                print(f"⚠️ Could not enable depth peeling: {e}")
+                
+            print("✅ Interactive camera controls configured")
+            print("📱 Mouse controls:")
+            print("   - Left click + drag: Rotate camera")
+            print("   - Right click + drag: Zoom")
+            print("   - Middle click + drag: Pan")
+            print("   - Scroll wheel: Zoom in/out")
+            
+        except Exception as e:
+            print(f"⚠️ Camera setup error: {e}")
+            import traceback
+            traceback.print_exc()
         
     def _main_loop(self):
         """Main visualization update loop"""
@@ -330,20 +389,43 @@ class PyVistaVisualizationProcess:
             print(f"   Window size: {self.plotter.window_size}")
             print(f"   OFF_SCREEN: {self.pv.OFF_SCREEN}")
             
+            # Process initial geometry data before starting window
+            print("🔍 Processing initial geometry data...")
+            initial_geometry_processed = 0
             try:
-                self.plotter.show(auto_close=False, interactive_update=True, interactive=True)
-                print("✅ Interactive window opened successfully")
+                while not self.geometry_queue.empty():
+                    data = self.geometry_queue.get_nowait()
+                    if isinstance(data, RobotGeometryData):
+                        print(f"🎨 Processing initial robot: {data.robot_name}")
+                        self._load_robot_geometry(data)
+                        initial_geometry_processed += 1
+                    else:
+                        print(f"⚠️ Unexpected initial data: {type(data)}")
+            except:
+                pass  # Queue empty
+                
+            print(f"✅ Processed {initial_geometry_processed} initial geometry items")
+            
+            # Render once to show initial geometry
+            if hasattr(self.plotter, 'render'):
+                self.plotter.render()
+                print("✅ Initial render completed")
+                
+            # Show the window in non-interactive mode for reliable display
+            print("📺 Starting non-interactive PyVista window...")
+            try:
+                self.plotter.show(interactive=False, auto_close=False)
+                print("✅ Non-interactive window displayed")
             except Exception as e:
-                print(f"❌ Failed to open interactive window: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"❌ Failed to open window: {e}")
                 return
             
             # Keep the window alive and update in background
             import threading
+            self._update_active = True
             
             def update_loop():
-                while True:
+                while self._update_active:
                     try:
                         # Check for new robot geometry
                         self._process_geometry_queue()
@@ -357,7 +439,7 @@ class PyVistaVisualizationProcess:
                         self.frame_count += 1
                         
                         # Control frame rate
-                        time.sleep(1.0 / self.config.update_frequency)
+                        time.sleep(1.0 / 60.0)  # 60 FPS
                         
                     except KeyboardInterrupt:
                         break
@@ -368,13 +450,17 @@ class PyVistaVisualizationProcess:
             # Start update thread
             update_thread = threading.Thread(target=update_loop, daemon=True)
             update_thread.start()
+            print("✅ Background updates configured")
             
             # Keep main thread alive for window interaction
             try:
-                while True:
+                while self._update_active:
                     time.sleep(0.1)
             except KeyboardInterrupt:
-                pass
+                print("⌨️ Process interrupted")
+            
+            # Stop updates
+            self._update_active = False
                 
         else:
             # Headless mode - simple loop
@@ -405,11 +491,33 @@ class PyVistaVisualizationProcess:
     def _process_geometry_queue(self):
         """Process robot geometry from queue"""
         try:
+            queue_items = 0
             while not self.geometry_queue.empty():
-                geometry_data: RobotGeometryData = self.geometry_queue.get_nowait()
-                self._load_robot_geometry(geometry_data)
-        except:
-            pass  # Queue empty
+                queue_items += 1
+                data = self.geometry_queue.get_nowait()
+                print(f"🔍 Processing geometry queue item {queue_items}: {type(data)}")
+                
+                # Check for shutdown signal
+                if isinstance(data, tuple) and len(data) == 2 and data[0] == 'shutdown':
+                    print("📢 Received shutdown signal from main process")
+                    raise KeyboardInterrupt("Shutdown signal received")
+                
+                # Process normal geometry data
+                if isinstance(data, RobotGeometryData):
+                    print(f"🤖 Processing robot geometry: {data.robot_name}")
+                    self._load_robot_geometry(data)
+                else:
+                    print(f"⚠️ Unknown geometry data type: {type(data)}")
+                    
+            # Reduce debug spam - only show initial queue check
+            if queue_items == 0 and not hasattr(self, '_first_empty_logged'):
+                self._first_empty_logged = True
+                    
+        except Exception as e:
+            if "Shutdown signal" in str(e):
+                raise  # Re-raise shutdown signal
+            print(f"⚠️ Geometry queue processing error: {e}")
+            pass  # Queue empty or other error
             
     def _load_robot_geometry(self, geometry_data: RobotGeometryData):
         """Load robot geometry using extracted data with URDFRobotVisualizer logic"""
@@ -609,8 +717,12 @@ class ProcessSeparatedPyVistaVisualizer:
     def __init__(self, config: Optional[SharedMemoryConfig] = None):
         self.config = config or SharedMemoryConfig()
         
+        # Setup logging
+        self.logger = get_logger(f'simpyros.process_separated_visualizer')
+        
         # Communication channels
         self.geometry_queue = Queue()
+        register_multiprocessing_queue(self.geometry_queue)  # Register for cleanup
         self.pose_manager = None
         self.viz_process = None
         
@@ -635,6 +747,7 @@ class ProcessSeparatedPyVistaVisualizer:
                 target=self._run_visualization_process,
                 args=(self.config, self.pose_manager.shm_name, self.geometry_queue)
             )
+            register_multiprocessing_process(self.viz_process)  # Register for cleanup
             self.viz_process.start()
             print(f"✅ Visualization process started (PID: {self.viz_process.pid})")
             
@@ -702,7 +815,13 @@ class ProcessSeparatedPyVistaVisualizer:
                 initial_pose=robot_instance.pose if hasattr(robot_instance, 'pose') else Pose(),
                 timestamp=time.time()
             )
+            print(f"📤 Sending geometry data to queue: {robot_name} ({len(links_data)} links)")
             self.geometry_queue.put(geometry_data)
+            print(f"✅ Geometry data sent to visualization process")
+            
+            # Give visualization process time to process the geometry
+            print("⏳ Waiting for visualization process to process geometry...")
+            time.sleep(1.0)
             
             # Register robot for pose updates
             if hasattr(robot_instance, 'links'):
@@ -728,15 +847,58 @@ class ProcessSeparatedPyVistaVisualizer:
         return self.pose_manager.update_robot_poses(robot_name, link_poses)
     
     def shutdown(self):
-        """Shutdown the visualizer"""
+        """Shutdown the visualizer with proper resource cleanup"""
+        # Send shutdown signal via queue if process is alive
         if self.viz_process and self.viz_process.is_alive():
-            self.viz_process.terminate()
-            self.viz_process.join(timeout=2.0)
+            try:
+                # Try to send shutdown signal
+                self.geometry_queue.put(('shutdown', None))
+                # Wait briefly for graceful shutdown
+                self.viz_process.join(timeout=2.0)
+            except Exception:
+                pass  # Ignore queue errors during shutdown
             
+            # Force terminate if still alive
+            if self.viz_process.is_alive():
+                self.viz_process.terminate()
+                self.viz_process.join(timeout=2.0)
+                
+            # Force kill if still alive
+            if self.viz_process.is_alive():
+                self.viz_process.kill()
+                self.viz_process.join(timeout=1.0)
+        
+        # Clean up queue resources
+        if hasattr(self, 'geometry_queue') and self.geometry_queue is not None:
+            try:
+                # Clear any remaining items
+                while not self.geometry_queue.empty():
+                    self.geometry_queue.get_nowait()
+            except Exception:
+                pass  # Queue might be closed
+            finally:
+                try:
+                    self.geometry_queue.close()
+                    self.geometry_queue.join_thread()
+                except Exception:
+                    pass
+                self.geometry_queue = None
+        
+        # Clean up shared memory
         if self.pose_manager:
             self.pose_manager.cleanup()
+            self.pose_manager = None
             
-        print("🛑 ProcessSeparatedPyVistaVisualizer 終了")
+        # Verify process termination
+        if self.viz_process:
+            if self.viz_process.is_alive():
+                log_warning(self.logger, f"Visualization process still alive after cleanup (PID: {self.viz_process.pid})")
+            else:
+                log_info(self.logger, f"Visualization process successfully terminated (exit code: {self.viz_process.exitcode})")
+            self.viz_process = None
+        
+        self.is_initialized = False
+        print("🛑 ProcessSeparatedPyVistaVisualizer terminated with resource cleanup")
     
     @staticmethod
     def _run_visualization_process(config: SharedMemoryConfig, shm_name: str, geometry_queue: Queue):

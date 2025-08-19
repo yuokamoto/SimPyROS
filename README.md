@@ -35,6 +35,7 @@ This enables **superior performance** (1500+ Hz headless), **simplified debuggin
 - 🧪 **High Performance**: 1500+ Hz headless, 60+ Hz with visualization
 - 🔧 **Processing Time Compensation**: Accurate real-time synchronization
 - 🛡️ **X11 Error-Free**: Robust display handling across all platforms
+- 📝 **Comprehensive Logging**: Structured logging with configurable levels and Japanese support
 
 ## 🚀 Quick Start
 
@@ -195,6 +196,46 @@ brew install python
 
 # Windows
 # Install Python from python.org
+```
+
+## 📝 Logging Configuration
+
+SimPyROS includes a comprehensive logging system with configurable output levels:
+
+### Environment Variables
+```bash
+# Control logging verbosity
+export SIMPYROS_DEBUG=0  # Warnings and errors only
+export SIMPYROS_DEBUG=1  # Normal output (default)
+export SIMPYROS_DEBUG=2  # Verbose debugging output
+
+# Alternative: Set in Python
+import os
+os.environ['SIMPYROS_DEBUG'] = '2'
+```
+
+### Programmatic Control
+```python
+from core.logger import set_log_level, enable_debug, suppress_verbose
+
+# Set specific levels
+set_log_level('DEBUG')    # Verbose debugging
+set_log_level('INFO')     # Normal information
+set_log_level('WARNING')  # Warnings and errors only
+
+# Convenience functions
+enable_debug()           # Enable debug logging
+suppress_verbose()       # Show warnings/errors only
+```
+
+### Logger Usage in Code
+```python
+from core.logger import get_logger, log_success, log_warning, log_error
+
+logger = get_logger('your_module')
+log_success(logger, "Operation completed successfully")
+log_warning(logger, "Warning message")
+log_error(logger, "Error occurred")
 ```
 
 ## 🆘 Troubleshooting

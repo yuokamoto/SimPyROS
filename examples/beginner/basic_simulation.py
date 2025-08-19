@@ -42,11 +42,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from core.simulation_manager import SimulationManager
 from core.simulation_object import Velocity, Pose
+from core.logger import get_logger, set_log_level, log_debug, log_warning
 
-# Performance optimization: Debug level control
+# Setup logging configuration
 DEBUG_LEVEL = os.getenv('SIMPYROS_DEBUG', '1')  # 0=None, 1=Minimal, 2=Verbose
-DEBUG_MINIMAL = DEBUG_LEVEL in ['1', '2']
-DEBUG_VERBOSE = DEBUG_LEVEL == '2'
+if DEBUG_LEVEL == '0':
+    set_log_level('WARNING')  # Suppress most output
+elif DEBUG_LEVEL == '1':
+    set_log_level('INFO')     # Normal output
+elif DEBUG_LEVEL == '2':
+    set_log_level('DEBUG')    # Verbose output
+
+logger = get_logger('simpyros.examples')
+
+# DEBUG flag definitions for backward compatibility
+DEBUG_VERBOSE = (DEBUG_LEVEL == '2')
+DEBUG_MINIMAL = (DEBUG_LEVEL in ['1', '2'])
 
 
 def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0, enable_monitor=False):
@@ -117,16 +128,6 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
             
             t = sim.get_sim_time()
             
-            # Optimized debug output - only when debugging enabled
-            if DEBUG_MINIMAL:
-                show_debug = (callback_count <= 10 or 
-                             callback_count % 100 == 0 or
-                             (callback_count <= 50 and callback_count % 10 == 0))
-                
-                if show_debug and DEBUG_VERBOSE:
-                    real_time = sim.get_real_time() if hasattr(sim, 'get_real_time') else 0
-                    print(f"🔄 Control #{callback_count}: sim_t={t:.2f}s, real_t={real_time:.2f}s, dt={dt:.4f}s")
-            
             # Apply smooth sinusoidal motion to all movable joints
             if movable_joints:
                 for i, joint_name in enumerate(movable_joints):
@@ -135,24 +136,20 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
                     phase = i * math.pi / 3  # Phase offset between joints
                     position = amplitude * math.sin(t * frequency + phase)
                     
-                    # Debug output for first joint only (only in verbose mode)
-                    if DEBUG_VERBOSE and callback_count <= 10 and i == 0:
-                        print(f"   Joint '{joint_name}': {position:.3f} rad ({math.degrees(position):.1f}°)")
-                    
                     sim.set_robot_joint_position("my_robot", joint_name, position)
-            else:
-                # No movable joints - minimal debug output
-                if DEBUG_VERBOSE and callback_count <= 3:
-                    print(f"   No joint motion (robot has no movable joints)")
         
         sim.set_robot_control_callback("my_robot", my_control, frequency=10.0)
         sim.run(duration=duration, auto_close=True)
         
     except Exception as e:
-        print(f"⚠️ Example error: {e}")
+        log_warning(logger, f"Example error: {e}")
     finally:
         try:
             sim.shutdown()
+            # Ensure monitor is fully stopped before continuing
+            if hasattr(sim, 'monitor') and sim.monitor:
+                print("⏳ Ensuring monitor cleanup...")
+                time.sleep(0.5)  # Give monitor time to fully close
         except:
             pass
 
@@ -210,9 +207,9 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
             
             # Optimized debug output - only when debugging enabled
             if DEBUG_VERBOSE and (mobile_callback_count <= 10 or mobile_callback_count % 50 == 0):
-                print(f"🚗 Mobile Callback #{mobile_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+                log_debug(logger, f"Mobile Callback #{mobile_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
                 if mobile_callback_count <= 3:
-                    print(f"   Using cached velocity objects for performance")
+                    log_debug(logger, "Using cached velocity objects for performance")
             
             # Use pre-cached velocity object instead of creating new one
             velocity = velocity_cache['circular']
@@ -222,10 +219,14 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
         sim.run(duration=duration, auto_close=True)
         
     except Exception as e:
-        print(f"⚠️ Example error: {e}")
+        log_warning(logger, f"Example error: {e}")
     finally:
         try:
             sim.shutdown()
+            # Ensure monitor is fully stopped before continuing
+            if hasattr(sim, 'monitor') and sim.monitor:
+                print("⏳ Ensuring monitor cleanup...")
+                time.sleep(0.5)  # Give monitor time to fully close
         except:
             pass
 
@@ -279,7 +280,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
             
             # Optimized debug output
             if DEBUG_VERBOSE and (robot1_callback_count <= 5 or robot1_callback_count % 25 == 0):
-                print(f"🤖1 Robot1 Callback #{robot1_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+                log_debug(logger, f"Robot1 Callback #{robot1_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
             
             # Use cached joint names instead of querying every time
             for i, joint_name in enumerate(robot1_movable_joints):
@@ -295,7 +296,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
             
             # Optimized debug output
             if DEBUG_VERBOSE and (robot2_callback_count <= 5 or robot2_callback_count % 25 == 0):
-                print(f"🤖2 Robot2 Callback #{robot2_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
+                log_debug(logger, f"Robot2 Callback #{robot2_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
             
             # Use cached joint names instead of querying every time
             for i, joint_name in enumerate(robot2_movable_joints):
@@ -308,10 +309,14 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         sim.run(duration=duration, auto_close=True)
         
     except Exception as e:
-        print(f"⚠️ Example error: {e}")
+        log_warning(logger, f"Example error: {e}")
     finally:
         try:
             sim.shutdown()
+            # Ensure monitor is fully stopped before continuing
+            if hasattr(sim, 'monitor') and sim.monitor:
+                print("⏳ Ensuring monitor cleanup...")
+                time.sleep(0.5)  # Give monitor time to fully close
         except:
             pass
 
@@ -538,6 +543,10 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, r
     finally:
         try:
             sim.shutdown()
+            # Ensure monitor is fully stopped before continuing
+            if hasattr(sim, 'monitor') and sim.monitor:
+                print("⏳ Ensuring monitor cleanup...")
+                time.sleep(0.5)  # Give monitor time to fully close
         except:
             pass
 
@@ -571,7 +580,7 @@ def headless_example():
         
         # Optimized debug output
         if DEBUG_MINIMAL and frame_count % 100 == 0:  # Print every second at 100Hz
-            print(f"🔄 Frame {frame_count}, dt={dt:.4f}s")
+            log_debug(logger, f"Frame {frame_count}, dt={dt:.4f}s")
         
         # Simple joint motion with cached joint names
         t = sim.get_sim_time()  # Use simulation time for real-time factor control
@@ -672,12 +681,17 @@ def main():
             
             func()
             
-            # Brief pause between examples
+            # Brief pause between examples with enhanced cleanup
             if name != "Headless Mode":
                 print(f"✅ {name} example completed. Next example starting soon...")
-                time.sleep(2.0)
+                # Additional cleanup time for monitor windows
+                time.sleep(2.5)
             else:
                 time.sleep(0.5)  # Short pause for headless
+                
+            # Force garbage collection between examples
+            import gc
+            gc.collect()
             
         except KeyboardInterrupt:
             print(f"\n⏹️ {name} interrupted by user")
@@ -694,6 +708,15 @@ def main():
     print("  ✅ Graceful shutdown handling")
     print("  ✅ Multi-robot support")
     print("  ✅ Headless mode support")
+    
+    # Final cleanup to ensure no hanging processes
+    print("\n🧹 Performing final cleanup...")
+    try:
+        from core.multiprocessing_cleanup import cleanup_multiprocessing_resources
+        cleanup_multiprocessing_resources()
+        print("✅ Final cleanup completed")
+    except Exception as e:
+        print(f"⚠️ Final cleanup warning: {e}")
 
 
 if __name__ == "__main__":

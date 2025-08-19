@@ -68,34 +68,23 @@ class SimulationMonitor:
         self.control_enabled = enable_controls
         self.control_callback = control_callback
         self.running = True
-        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
+        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=False)
         self.monitor_thread.start()
         
     def stop(self):
-        """Stop the monitor window with enhanced error handling"""
+        """Stop the monitor window with thread-safe handling"""
         print("🛑 Stopping simulation monitor...")
         self.running = False
         
-        # Force close window with multiple attempts
-        if self.window:
-            for attempt in range(3):
-                try:
-                    # Try different cleanup methods
-                    if attempt == 0:
-                        self.window.quit()
-                        self.window.destroy()
-                    elif attempt == 1:
-                        self.window.wm_withdraw()
-                        self.window.quit()
-                    else:
-                        # Force destroy
-                        self.window.destroy()
-                    print(f"✅ Monitor window closed (attempt {attempt + 1})")
-                    break
-                except Exception as e:
-                    print(f"⚠️ Monitor cleanup attempt {attempt + 1} failed: {e}")
-                    if attempt == 2:
-                        print("❌ Failed to close monitor window gracefully")
+        # Signal monitor thread to close gracefully
+        self._signal_close()
+        
+        # Wait for monitor thread to finish
+        if hasattr(self, 'monitor_thread') and self.monitor_thread and self.monitor_thread.is_alive():
+            print("⏳ Waiting for monitor thread to finish...")
+            self.monitor_thread.join(timeout=3.0)
+            if self.monitor_thread.is_alive():
+                print("⚠️ Monitor thread did not finish gracefully")
         
         # Clean up data file
         try:
@@ -106,6 +95,18 @@ class SimulationMonitor:
             print(f"⚠️ Failed to clean up monitor data file: {e}")
             
         self.window = None
+        print("✅ Monitor stopped successfully")
+        
+    def _signal_close(self):
+        """Signal the monitor thread to close (thread-safe)"""
+        try:
+            # Create a signal file to communicate with monitor thread
+            signal_file = os.path.join(tempfile.gettempdir(), "simpyros_monitor_close_signal.txt")
+            with open(signal_file, 'w') as f:
+                f.write("close")
+            print("📡 Close signal sent to monitor thread")
+        except Exception as e:
+            print(f"⚠️ Failed to send close signal: {e}")
                 
     def _run_monitor(self):
         """Run the tkinter monitor window with X11 error handling"""
@@ -133,8 +134,14 @@ class SimulationMonitor:
             
             # Set up error handling for X11 issues
             def on_closing():
+                """Handle window close event"""
+                print("🔴 Monitor window close requested")
                 self.running = False
-                self.stop()
+                try:
+                    if self.window:
+                        self.window.quit()  # Exit mainloop
+                except Exception as e:
+                    print(f"⚠️ Error during window close: {e}")
             
             self.window.protocol("WM_DELETE_WINDOW", on_closing)
             
@@ -204,6 +211,7 @@ class SimulationMonitor:
             # Start the tkinter main loop with error handling
             try:
                 self.window.mainloop()
+                print("✅ Monitor window mainloop exited gracefully")
             except Exception as e:
                 print(f"❌ Monitor window mainloop error: {e}")
                 self.x11_error_count += 1
@@ -212,6 +220,15 @@ class SimulationMonitor:
                     self.running = False
             finally:
                 self.running = False
+                # Clean up window within the same thread
+                if self.window:
+                    try:
+                        self.window.destroy()
+                        print("✅ Monitor window destroyed in thread")
+                    except Exception as e:
+                        print(f"⚠️ Error destroying window in thread: {e}")
+                    finally:
+                        self.window = None
                 
         except Exception as e:
             print(f"❌ Monitor window creation failed: {e}")
@@ -225,8 +242,21 @@ class SimulationMonitor:
             
     def _update_display(self):
         """Update the display with latest data"""
-        if not self.running:
+        if not self.running or not self.window:
             return
+            
+        # Check for close signal
+        signal_file = os.path.join(tempfile.gettempdir(), "simpyros_monitor_close_signal.txt")
+        if os.path.exists(signal_file):
+            try:
+                os.remove(signal_file)
+                print("📡 Received close signal, shutting down monitor")
+                self.running = False
+                if self.window:
+                    self.window.quit()  # Exit mainloop from within the thread
+                return
+            except Exception as e:
+                print(f"⚠️ Error processing close signal: {e}")
             
         try:
             # Read data from shared file
@@ -339,11 +369,19 @@ def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, c
         control_callback: Function to call for control commands
         
     Returns:
-        SimulationMonitor instance
+        Monitor instance (process-separated for better thread safety)
     """
-    monitor = SimulationMonitor(title)
-    monitor.start(enable_controls, control_callback)
-    return monitor
+    try:
+        from core.process_separated_monitor import create_process_separated_monitor
+        print("📊 Using process-separated monitor for better thread safety")
+        monitor = create_process_separated_monitor(title)
+        monitor.start(enable_controls, control_callback)
+        return monitor
+    except Exception as e:
+        print(f"⚠️ Process-separated monitor not available, using threaded version: {e}")
+        monitor = SimulationMonitor(title)
+        monitor.start(enable_controls, control_callback)
+        return monitor
 
 
 # Standalone monitor launcher for testing

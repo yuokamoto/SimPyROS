@@ -134,6 +134,9 @@ class PyVistaVisualizer:
     def _setup_non_blocking_mode(self):
         """Setup non-blocking mode for PyVista to prevent simulation blocking"""
         try:
+            # Enable interactive camera controls
+            self._setup_camera_controls()
+            
             # Show window in non-blocking mode
             self.plotter.show(
                 auto_close=False,
@@ -141,8 +144,40 @@ class PyVistaVisualizer:
                 full_screen=False
             )
             print("⚡ PyVista non-blocking mode enabled for real-time simulation")
+            print("🖱️  Interactive camera controls enabled:")
+            print("     左クリック+ドラッグ: 回転")
+            print("     右クリック+ドラッグ: ズーム")
+            print("     中クリック+ドラッグ: パン")
+            print("     マウスホイール: ズームイン/アウト")
         except Exception as e:
             print(f"⚠️ Could not enable non-blocking mode: {e}")
+    
+    def _setup_camera_controls(self):
+        """Setup enhanced camera controls for interactive navigation"""
+        if not self.plotter:
+            return
+            
+        try:
+            # Enable all interactive modes
+            self.plotter.enable_trackball_style()  # Better rotation control
+            
+            # Set initial camera position for good 3D view
+            self.plotter.camera.position = (10, 10, 10)
+            self.plotter.camera.focal_point = (0, 0, 0)
+            self.plotter.camera.up = (0, 0, 1)  # Z-up orientation
+            
+            # Enable depth peeling for better transparency
+            if hasattr(self.plotter, 'enable_depth_peeling'):
+                self.plotter.enable_depth_peeling()
+                
+            # Set camera controls
+            self.plotter.camera.view_angle = 60  # Field of view
+            self.plotter.camera.clipping_range = (0.1, 1000)  # Near/far clipping
+            
+            print("📷 Enhanced camera controls configured")
+            
+        except Exception as e:
+            print(f"⚠️ Camera setup error: {e}")
     
     def batch_mode(self):
         """Context manager for batch rendering to improve performance"""
@@ -453,24 +488,7 @@ def setup_basic_scene(visualizer: PyVistaVisualizer) -> bool:
     return success
 
 
-# Robot mesh creation functions
-def create_robot_mesh_from_urdf(visualizer: PyVistaVisualizer, urdf_path: str = None, package_path: str = None):
-    """Create a robot mesh from URDF file - DEPRECATED: Use URDFRobotVisualizer instead"""
-    warnings.warn("create_robot_mesh_from_urdf is deprecated. Use URDFRobotVisualizer._create_mesh_from_urdf() instead.", 
-                 DeprecationWarning, stacklevel=2)
-    
-    if not visualizer.available:
-        return None
-        
-    if not urdf_path:
-        print("URDF path required for robot_type='urdf'")
-        return None
-    
-    # RobotMeshFactory has been deprecated and integrated into URDFRobotVisualizer
-    # This function is now a legacy wrapper - use URDFRobotVisualizer.load_robot() instead
-    warnings.warn("create_robot_mesh_from_urdf is deprecated. Use URDFRobotVisualizer.load_robot() instead.", 
-                 DeprecationWarning, stacklevel=2)
-    return None
+# Deprecated function removed - use URDFRobotVisualizer.load_robot() instead
 
 
 class URDFRobotVisualizer(PyVistaVisualizer):

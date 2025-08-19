@@ -27,6 +27,9 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+# Import logging configuration
+from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
+
 from core.robot import Robot, create_robot_from_urdf, RobotParameters
 from core.simulation_object import SimulationObject, ObjectParameters, Pose, Velocity
 from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visualizer
@@ -35,6 +38,7 @@ from core.meshcat_visualizer import MeshCatURDFRobotVisualizer, create_meshcat_v
 from core.time_manager import TimeManager, set_global_time_manager
 from core.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
 from core.simulation_monitor import create_simulation_monitor
+from core.multiprocessing_cleanup import cleanup_multiprocessing_resources
 
 
 @dataclass
@@ -51,7 +55,7 @@ class SimulationConfig:
     
     # Visualization backend settings
     visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'meshcat', 'process_separated_pyvista'
-    use_optimized_visualizer: bool = False  # Use optimized PyVista visualizer (deprecated, use visualization_backend)
+    # Removed deprecated use_optimized_visualizer option - use visualization_backend instead
     visualization_optimization_level: str = 'balanced'  # 'performance', 'balanced', 'quality'
     enable_batch_rendering: bool = True  # Enable batch rendering for multiple robots
     
@@ -119,6 +123,9 @@ class SimulationManager:
         """
         self.config = config or SimulationConfig()
         
+        # Setup logging
+        self.logger = get_logger(f'simpyros.simulation')
+        
         # Core components - use RealtimeEnvironment
         self.time_manager: Optional[TimeManager] = None
         self.visualizer: Optional[Union[URDFRobotVisualizer, MeshCatURDFRobotVisualizer]] = None
@@ -157,7 +164,7 @@ class SimulationManager:
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown"""
         def signal_handler(signum, frame):
-            print("\n🛑 Shutdown requested...")
+            log_warning(self.logger, "\n🛑 Shutdown requested...")
             self._shutdown_requested = True
             self.shutdown()
             # Force exit if shutdown doesn't work
@@ -177,7 +184,7 @@ class SimulationManager:
             )
             # Set as global time manager for easy access
             set_global_time_manager(self.time_manager)
-            print(f"✅ TimeManager initialized with RealtimeEnvironment (factor={self.config.real_time_factor}x)")
+            log_success(self.logger, f"TimeManager initialized with RealtimeEnvironment (factor={self.config.real_time_factor}x)")
     
     @property
     def env(self) -> simpy.rt.RealtimeEnvironment:
@@ -190,7 +197,7 @@ class SimulationManager:
             return
             
         try:
-            print("📊 Creating simulation monitor window")
+            log_info(self.logger, "Creating simulation monitor window")
             backend_name = self.config.visualization_backend if self.config.visualization else 'headless'
             self.monitor = create_simulation_monitor(
                 title=f"SimPyROS Monitor - {backend_name}",
@@ -203,13 +210,13 @@ class SimulationManager:
             time.sleep(0.1)
             
             if self.monitor and hasattr(self.monitor, 'running') and self.monitor.running:
-                print("✅ Simulation monitor initialized successfully")
+                log_success(self.logger, "Simulation monitor initialized successfully")
             else:
-                print("⚠️ Monitor initialization may have failed")
+                log_warning(self.logger, "Monitor initialization may have failed")
                 
         except Exception as e:
-            print(f"⚠️ Failed to create monitor window: {e}")
-            print("   Continuing simulation without monitor...")
+            log_warning(self.logger, f"Failed to create monitor window: {e}")
+            log_info(self.logger, "Continuing simulation without monitor...")
             self.monitor = None
     
     def _initialize_visualization(self):
@@ -221,23 +228,20 @@ class SimulationManager:
             # Choose visualizer backend based on configuration
             backend = self.config.visualization_backend.lower()
             
-            # Handle legacy configuration (use_optimized_visualizer)
-            if hasattr(self.config, 'use_optimized_visualizer') and self.config.use_optimized_visualizer and backend == 'pyvista':
-                warnings.warn("optimized_pyvista backend is deprecated. Using process_separated_pyvista instead.", DeprecationWarning)
-                backend = 'process_separated_pyvista'
+            # Legacy configuration handling removed - use visualization_backend directly
             
-            print(f"🎯 Initializing visualization backend: {backend}")
+            log_info(self.logger, f"Initializing visualization backend: {backend}")
             
             try:
                 if backend == 'meshcat':
-                    print(f"🌐 Creating MeshCat visualizer (port: {self.config.meshcat_port})")
+                    log_info(self.logger, f"Creating MeshCat visualizer (port: {self.config.meshcat_port})")
                     self.visualizer = create_meshcat_visualizer(
                         port=self.config.meshcat_port,
                         open_browser=self.config.meshcat_open_browser
                     )
                     
                 elif backend == 'process_separated_pyvista':
-                    print(f"⚡ Creating process-separated PyVista visualizer")
+                    log_info(self.logger, "Creating process-separated PyVista visualizer")
                     from core.process_separated_pyvista import SharedMemoryConfig
                     config = SharedMemoryConfig(
                         max_robots=self.config.max_robots,
@@ -247,19 +251,10 @@ class SimulationManager:
                     self.visualizer = create_process_separated_urdf_visualizer(config=config)
                     
                     
-                elif backend == 'optimized_pyvista':
-                    warnings.warn("optimized_pyvista backend is deprecated. Using process_separated_pyvista instead.", DeprecationWarning)
-                    print(f"⚡ Creating process-separated PyVista visualizer (optimized_pyvista deprecated)")
-                    from core.process_separated_pyvista import SharedMemoryConfig
-                    config = SharedMemoryConfig(
-                        max_robots=self.config.max_robots,
-                        max_links_per_robot=self.config.max_links_per_robot,
-                        update_frequency=self.config.visualization_update_rate
-                    )
-                    self.visualizer = create_process_separated_urdf_visualizer(config=config)
+                # Deprecated optimized_pyvista backend removed - use process_separated_pyvista
                     
                 elif backend == 'pyvista':
-                    print("📺 Creating standard PyVista visualizer")
+                    log_info(self.logger, "Creating standard PyVista visualizer")
                     self.visualizer = create_urdf_robot_visualizer(
                         interactive=True,
                         window_size=self.config.window_size
@@ -281,24 +276,24 @@ class SimulationManager:
                     
                     # Print backend-specific info
                     if backend == 'meshcat':
-                        print(f"   🌐 MeshCat server: http://127.0.0.1:{self.config.meshcat_port}/static/")
-                        print(f"   📱 Web-based interface with mesh support")
+                        log_info(self.logger, f"MeshCat server: http://127.0.0.1:{self.config.meshcat_port}/static/")
+                        log_info(self.logger, "Web-based interface with mesh support")
                         
                     elif backend == 'process_separated_pyvista':
-                        print(f"   ⚡ Process separation: ENABLED")
-                        print(f"   📊 Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")
-                        print(f"   🛡️ Crash isolation: PyVista crashes don't affect simulation")
-                        print(f"   🚀 Non-blocking updates: SimPy performance maintained")
+                        log_debug(self.logger, "Process separation: ENABLED")
+                        log_debug(self.logger, f"Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")
+                        log_debug(self.logger, "Crash isolation: PyVista crashes don't affect simulation")
+                        log_debug(self.logger, "Non-blocking updates: SimPy performance maintained")
                         
                         
                     elif backend == 'pyvista':
-                        print(f"   📺 Standard PyVista rendering")
+                        log_debug(self.logger, "Standard PyVista rendering")
                 else:
                     warnings.warn(f"{backend} visualization system not available, running headless")
                     self.config.visualization = False
                     
             except Exception as e:
-                print(f"❌ Failed to initialize {backend} visualizer: {e}")
+                log_error(self.logger, f"Failed to initialize {backend} visualizer: {e}")
                 warnings.warn(f"Visualization backend '{backend}' failed, running headless")
                 self.config.visualization = False
     
@@ -362,7 +357,7 @@ class SimulationManager:
                         self.visualizer.connect_simulation_manager(self)
                     self.visualizer.load_robot(name, robot)  # Updated method signature
             
-            print(f"✅ Robot '{name}' added from {urdf_path}")
+            log_success(self.logger, f"Robot '{name}' added from {urdf_path}")
             return robot
             
         except Exception as e:
@@ -383,7 +378,7 @@ class SimulationManager:
             raise ValueError(f"Robot '{name}' already exists")
         
         self.robots[name] = robot
-        print(f"✅ Robot '{name}' added")
+        log_success(self.logger, f"Robot '{name}' added")
         return True
     
     def add_object(self, name: str, obj: SimulationObject) -> bool:
@@ -406,7 +401,7 @@ class SimulationManager:
         if self._frequency_grouping_enabled:
             self._add_simulation_object_to_frequency_group(name, obj)
         
-        print(f"✅ Object '{name}' added")
+        log_success(self.logger, f"Object '{name}' added")
         return True
     
     def set_robot_control_callback(self, 
@@ -434,7 +429,7 @@ class SimulationManager:
             # Traditional individual callback
             self.control_callbacks[name] = ControlCallback(callback, frequency)
         
-        print(f"✅ Control callback set for robot '{name}' at {frequency} Hz")
+        log_success(self.logger, f"Control callback set for robot '{name}' at {frequency} Hz")
         return True
     
     def get_robot(self, name: str) -> Optional[Robot]:
@@ -499,7 +494,7 @@ class SimulationManager:
                     try:
                         callback.call(callback_dt, current_sim_time)
                     except Exception as e:
-                        print(f"⚠️ Control callback error for {robot_name}: {e}")
+                        log_warning(self.logger, f"Control callback error for {robot_name}: {e}")
             
             self._frame_count += 1
             
@@ -515,46 +510,19 @@ class SimulationManager:
         
         while self._running and not self._shutdown_requested:
             
-            # Use batch rendering for optimized visualizer
-            if (self.config.use_optimized_visualizer and 
-                self.config.enable_batch_rendering and 
-                hasattr(self.visualizer, 'batch_mode') and 
-                len(self.robots) > 1):
-                
-                # Batch update all robots
+            # Standard visualization updates (deprecated batch rendering removed)
+            for robot_name, robot in self.robots.items():
                 try:
-                    with self.visualizer.batch_mode():
-                        for robot_name, robot in self.robots.items():
-                            try:
-                                self.visualizer.update_robot_visualization(robot_name, force_render=False)
-                            except Exception as e:
-                                print(f"⚠️ Robot visualization update error for {robot_name}: {e}")
-                        
-                        # Update simulation objects in batch
-                        for object_name, obj in self.objects.items():
-                            try:
-                                self._update_object_visualization(object_name, obj)
-                            except Exception as e:
-                                print(f"⚠️ Object visualization update error for {object_name}: {e}")
-                    # Rendering happens automatically when exiting batch_mode context
-                    
+                    self.visualizer.update_robot_visualization(robot_name)
                 except Exception as e:
-                    print(f"⚠️ Batch visualization update error: {e}")
-                    
-            else:
-                # Standard individual updates
-                for robot_name, robot in self.robots.items():
-                    try:
-                        self.visualizer.update_robot_visualization(robot_name)
-                    except Exception as e:
-                        print(f"⚠️ Robot visualization update error for {robot_name}: {e}")
-                
-                # Update simulation object visualizations
-                for object_name, obj in self.objects.items():
-                    try:
-                        self._update_object_visualization(object_name, obj)
-                    except Exception as e:
-                        print(f"⚠️ Object visualization update error for {object_name}: {e}")
+                    log_warning(self.logger, f"Robot visualization update error for {robot_name}: {e}")
+            
+            # Update simulation object visualizations
+            for object_name, obj in self.objects.items():
+                try:
+                    self._update_object_visualization(object_name, obj)
+                except Exception as e:
+                    log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
             
             # Update monitor window with current data
             self._update_monitor_data()
@@ -603,13 +571,13 @@ class SimulationManager:
                             vtk_matrix.SetElement(i, j, transform_matrix[i, j])
                     obj._mesh_actor.SetUserMatrix(vtk_matrix)
                 except Exception as e:
-                    print(f"⚠️ Failed to update {object_name} transformation: {e}")
+                    log_warning(self.logger, f"Failed to update {object_name} transformation: {e}")
             else:
                 # Object not yet visualized, create mesh if needed
                 self._create_object_mesh(object_name, obj)
                 
         except Exception as e:
-            print(f"⚠️ Failed to update visualization for {object_name}: {e}")
+            log_warning(self.logger, f"Failed to update visualization for {object_name}: {e}")
     
     def _create_object_mesh(self, object_name: str, obj: SimulationObject):
         """Create mesh representation for simulation object"""
@@ -652,10 +620,10 @@ class SimulationManager:
                     name=f"object_{object_name}"
                 )
                 obj._mesh_actor = actor
-                print(f"✅ Created visualization for {object_name}: {geometry_type}")
+                log_success(self.logger, f"Created visualization for {object_name}: {geometry_type}")
                 
         except Exception as e:
-            print(f"⚠️ Failed to create mesh for {object_name}: {e}")
+            log_warning(self.logger, f"Failed to create mesh for {object_name}: {e}")
     
     def run(self, duration: Optional[float] = None, auto_close: bool = False, duration_mode: str = 'sim_time') -> bool:
         """
@@ -670,10 +638,10 @@ class SimulationManager:
             Success status
         """
         if not self.robots and not self.objects:
-            print("⚠️ No robots or objects to simulate")
+            log_warning(self.logger, "No robots or objects to simulate")
             return False
         
-        print("🚀 Starting simulation...")
+        log_info(self.logger, "Starting simulation...")
         print(f"   Robots: {len(self.robots)}")
         print(f"   Objects: {len(self.objects)}")
         print(f"   Update rate: {self.config.update_rate} Hz")
@@ -754,7 +722,7 @@ class SimulationManager:
                                 break
                     
                     except Exception as e:
-                        print(f"⚠️ Visualization error: {e}")
+                        log_warning(self.logger, f"Visualization error: {e}")
                         # Fall back to headless mode
                         is_process_separated = True
                 
@@ -774,7 +742,7 @@ class SimulationManager:
                                     break
                                     
                     except KeyboardInterrupt:
-                        print("\n🛑 Visualization interrupted")
+                        log_info(self.logger, "\nVisualization interrupted")
                         self._shutdown_requested = True
             else:
                 # Headless mode: let RealtimeEnvironment handle timing properly
@@ -805,10 +773,10 @@ class SimulationManager:
                         # Infinite headless simulation
                         self.env.run()
                     except KeyboardInterrupt:
-                        print("\n⏹️ Simulation stopped by user")
+                        log_info(self.logger, "\nSimulation stopped by user")
                         
         except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
+            log_info(self.logger, "\nInterrupted by user")
             self._shutdown_requested = True
         finally:
             # Print timing statistics before shutdown
@@ -825,11 +793,11 @@ class SimulationManager:
             self._running = False  # Stop simulation callbacks
             
             if auto_close:
-                print("🔄 Auto-closing for next example...")
+                log_info(self.logger, "Auto-closing for next example...")
                 self._shutdown_requested = True
                 time.sleep(0.1)
             else:
-                print("💡 Visualization continues - close window or press Ctrl+C to exit")
+                log_info(self.logger, "Visualization continues - close window or press Ctrl+C to exit")
     
     def _run_simulation_step(self, simulation_end_time: Optional[float]) -> bool:
         """Run a single simulation step, returns False if simulation should end"""
@@ -859,7 +827,7 @@ class SimulationManager:
         if self.time_manager:
             self.time_manager.set_real_time_factor(factor)
         
-        print(f"⏱️ SimulationManager real-time factor: {old_factor:.2f}x → {factor:.2f}x")
+        log_info(self.logger, f"SimulationManager real-time factor: {old_factor:.2f}x → {factor:.2f}x")
         
         # Sync to visualizer if available
         if hasattr(self, 'visualizer') and self.visualizer and hasattr(self.visualizer, 'realtime_factor'):
@@ -879,7 +847,7 @@ class SimulationManager:
             self.time_manager.set_speed_limit_enabled(enabled)
             print(f"🚦 SimulationManager: Speed limiting {'ENABLED' if enabled else 'DISABLED'}")
         else:
-            print("⚠️ TimeManager not available - speed limiting not available")
+            log_warning(self.logger, "TimeManager not available - speed limiting not available")
     
     # Centralized time management methods (memo.txt item 10)
     def get_sim_time(self) -> float:
@@ -898,7 +866,7 @@ class SimulationManager:
         """Set simulation time step"""
         if time_step > 0:
             self.config.time_step = time_step
-            print(f"⏱️ Time step updated: {time_step:.4f}s")
+            log_info(self.logger, f"Time step updated: {time_step:.4f}s")
     
     def get_timing_stats(self) -> dict:
         """Get real-time synchronization statistics from time manager"""
@@ -926,16 +894,16 @@ class SimulationManager:
                     linear_x=0.0, linear_y=0.0, linear_z=0.0,
                     angular_x=0.0, angular_y=0.0, angular_z=0.0
                 ))
-                print(f"⏸️ Stopped base velocity for robot '{robot_name}'")
+                log_info(self.logger, f"Stopped base velocity for robot '{robot_name}'")
             except Exception as e:
-                print(f"⚠️ Error stopping robot '{robot_name}' base velocity: {e}")
+                log_warning(self.logger, f"Error stopping robot '{robot_name}' base velocity: {e}")
         
-        print("⏸️ Simulation paused by user")
+        log_info(self.logger, "Simulation paused by user")
     
     def resume_simulation(self):
         """Resume the simulation"""
         self._simulation_paused = False
-        print("▶️ Simulation resumed by user")
+        log_info(self.logger, "Simulation resumed by user")
     
     def clear_all_robots(self):
         """Remove all robots from simulation"""
@@ -968,15 +936,15 @@ class SimulationManager:
             self.robots.clear()
             self.objects.clear()
             
-            print("🗑️ All robots and objects cleared from simulation")
+            log_info(self.logger, "All robots and objects cleared from simulation")
             
         except Exception as e:
-            print(f"⚠️ Error clearing robots: {e}")
+            log_warning(self.logger, f"Error clearing robots: {e}")
     
     def reset_simulation(self):
         """Reset simulation to initial state"""
         self._reset_requested = True
-        print("🔄 Simulation reset requested")
+        log_info(self.logger, "Simulation reset requested")
         
         # Clear all robots and objects for fresh start
         self.clear_all_robots()
@@ -992,7 +960,7 @@ class SimulationManager:
             try:
                 self._initialize_visualization()
             except Exception as e:
-                print(f"⚠️ Visualization reinitialization warning: {e}")
+                log_warning(self.logger, f"Visualization reinitialization warning: {e}")
         
         # Reset simulation time
         self._frame_count = 0
@@ -1019,7 +987,7 @@ class SimulationManager:
         if not self._running and not self._shutdown_requested:
             return
             
-        print("🛑 Shutting down simulation...")
+        log_info(self.logger, "Shutting down simulation...")
         self._shutdown_requested = True
         self._running = False
         
@@ -1028,28 +996,32 @@ class SimulationManager:
             try:
                 robot.shutdown_processes()
             except Exception as e:
-                print(f"⚠️ Error shutting down robot '{robot_name}': {e}")
+                log_warning(self.logger, f"Error shutting down robot '{robot_name}': {e}")
         
         # Shutdown all object processes
         for object_name, obj in self.objects.items():
             try:
                 obj.stop_motion_process()
             except Exception as e:
-                print(f"⚠️ Error shutting down object '{object_name}': {e}")
+                log_warning(self.logger, f"Error shutting down object '{object_name}': {e}")
         
-        # Clean up visualization safely
+        # Clean up visualization safely with proper resource management
         if self.visualizer:
             try:
                 # Check if this is a process-separated visualizer
                 if hasattr(self.visualizer, 'shutdown'):
+                    log_info(self.logger, "Shutting down process-separated visualizer...")
                     # Process-separated visualizer has its own shutdown method
                     self.visualizer.shutdown()
+                    log_info(self.logger, "Process-separated visualizer shutdown complete")
                 elif hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
                     # Standard PyVista visualizer
+                    log_info(self.logger, "Closing standard PyVista visualizer...")
                     self.visualizer.plotter.close()
                     self.visualizer.plotter = None
+                    log_info(self.logger, "Standard PyVista visualizer closed")
             except Exception as e:
-                print(f"⚠️ Visualization cleanup warning: {e}")
+                log_warning(self.logger, f"Visualization cleanup warning: {e}")
             finally:
                 self.visualizer = None
         
@@ -1058,7 +1030,7 @@ class SimulationManager:
             try:
                 self.monitor.stop()
             except Exception as e:
-                print(f"⚠️ Monitor cleanup warning: {e}")
+                log_warning(self.logger, f"Monitor cleanup warning: {e}")
             finally:
                 self.monitor = None
         
@@ -1082,7 +1054,14 @@ class SimulationManager:
             print(f"📊 Simulation ran for {elapsed:.1f}s")
             print(f"📊 Average update rate: {avg_fps:.1f} Hz")
         
-        print("✅ Simulation shutdown complete")
+        # Final multiprocessing resource cleanup
+        try:
+            cleanup_multiprocessing_resources()
+            log_info(self.logger, "Multiprocessing resources cleaned up")
+        except Exception as e:
+            log_warning(self.logger, f"Error during multiprocessing cleanup: {e}")
+        
+        log_success(self.logger, "Simulation shutdown complete")
     
     def get_simulation_info(self) -> Dict[str, Any]:
         """Get simulation information and statistics"""
@@ -1164,7 +1143,7 @@ class SimulationManager:
         robot_frequency = self.robot_frequencies.get(name, frequency)
         
         if robot_frequency != frequency:
-            print(f"⚠️ Robot '{name}' callback frequency ({frequency} Hz) differs from "
+            log_warning(self.logger, f"Robot '{name}' callback frequency ({frequency} Hz) differs from "
                   f"robot joint_update_rate ({robot_frequency} Hz). Using robot frequency.")
             frequency = robot_frequency
         
@@ -1250,7 +1229,7 @@ class SimulationManager:
                     robot._update_forward_kinematics()
                     
             except Exception as e:
-                print(f"❌ Robot update error for {robot.name}: {e}")
+                log_error(self.logger, f"Robot update error for {robot.name}: {e}")
         
         return robot_update_wrapper
     
@@ -1269,7 +1248,7 @@ class SimulationManager:
                     obj.update(dt)
                     
             except Exception as e:
-                print(f"❌ Object update error for {obj.name if hasattr(obj, 'name') else 'unnamed'}: {e}")
+                log_error(self.logger, f"Object update error for {obj.name if hasattr(obj, 'name') else 'unnamed'}: {e}")
         
         return object_update_wrapper
     
@@ -1306,7 +1285,7 @@ class SimulationManager:
             process = self.env.process(self._frequency_group_process_loop(frequency))
             group['process'] = process
         
-        print(f"✅ Started {len(active_frequencies)} frequency-grouped processes")
+        log_success(self.logger, f"Started {len(active_frequencies)} frequency-grouped processes")
     
     def _frequency_group_process_loop(self, frequency: float):
         """Process loop for a specific frequency group - handles all updates at this frequency"""
@@ -1329,7 +1308,7 @@ class SimulationManager:
                             robot_update_info['call_count'] += 1
                             group['update_count'] += 1
                         except Exception as e:
-                            print(f"❌ Robot update error for {robot_update_info['name']}: {e}")
+                            log_error(self.logger, f"Robot update error for {robot_update_info['name']}: {e}")
                     
                     # 2. Execute all object internal updates in this frequency group  
                     for object_update_info in group['object_updates']:
@@ -1338,7 +1317,7 @@ class SimulationManager:
                             object_update_info['call_count'] += 1
                             group['update_count'] += 1
                         except Exception as e:
-                            print(f"❌ Object update error for {object_update_info['name']}: {e}")
+                            log_error(self.logger, f"Object update error for {object_update_info['name']}: {e}")
                     
                     # 3. Execute all user control callbacks in this frequency group
                     for callback_info in group['callbacks']:
@@ -1347,14 +1326,14 @@ class SimulationManager:
                             callback_info['call_count'] += 1
                             group['callback_count'] += 1
                         except Exception as e:
-                            print(f"❌ Callback error for {callback_info['robot_name']}: {e}")
+                            log_error(self.logger, f"Callback error for {callback_info['robot_name']}: {e}")
                 
                 # Single yield for entire frequency group - this is the revolutionary optimization!
                 # All robot updates, object updates, and callbacks processed in ONE yield
                 yield self.env.timeout(dt)
                 
             except Exception as e:
-                print(f"❌ Frequency group {frequency} Hz process error: {e}")
+                log_error(self.logger, f"Frequency group {frequency} Hz process error: {e}")
                 break
     
     def _calculate_process_reduction_percent(self) -> float:
@@ -1456,7 +1435,7 @@ class SimulationManager:
                 print(f"   Timing accuracy: N/A (insufficient data)")
                 
         except Exception as e:
-            print(f"⚠️ Could not get timing stats: {e}")
+            log_warning(self.logger, f"Could not get timing stats: {e}")
     
     def _handle_monitor_control(self, command: str):
         """Handle control commands from monitor window"""
@@ -1465,7 +1444,7 @@ class SimulationManager:
             print(f"🎮 Monitor control: {'Paused' if self._simulation_paused else 'Resumed'}")
         elif command == 'reset':
             self._reset_requested = True
-            print("🎮 Monitor control: Reset requested")
+            log_info(self.logger, "Monitor control: Reset requested")
     
     def _update_monitor_data(self):
         """Update monitor window with current simulation data"""
@@ -1487,18 +1466,35 @@ class SimulationManager:
                 error_percent = abs(actual_factor - timing_stats.real_time_factor) / timing_stats.real_time_factor * 100
                 timing_accuracy = 100.0 - error_percent
             
-            # Prepare monitor data
+            # Calculate detailed timing information
+            actual_factor = 0.0
+            accuracy_text = "N/A"
+            
+            if timing_stats and timing_stats.real_time_elapsed > 0 and timing_stats.sim_time > 0:
+                actual_factor = timing_stats.sim_time / timing_stats.real_time_elapsed
+                error_percent = abs(actual_factor - timing_stats.real_time_factor) / timing_stats.real_time_factor * 100
+                
+                # Create accuracy rating
+                if error_percent < 5:
+                    accuracy_text = f"EXCELLENT ({error_percent:.1f}%)"
+                elif error_percent < 15:
+                    accuracy_text = f"GOOD ({error_percent:.1f}%)"
+                elif error_percent < 30:
+                    accuracy_text = f"FAIR ({error_percent:.1f}%)"
+                else:
+                    accuracy_text = f"POOR ({error_percent:.1f}%)"
+            
+            # Prepare enhanced monitor data
             monitor_data = {
                 'sim_time': timing_stats.sim_time if timing_stats else 0.0,
-                'real_time': timing_stats.real_time_elapsed if timing_stats else 0.0,
-                'target_rt_factor': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
-                'actual_rt_factor': (timing_stats.sim_time / timing_stats.real_time_elapsed) if (timing_stats and timing_stats.real_time_elapsed > 0) else 0.0,
-                'timing_accuracy': max(0.0, timing_accuracy),
-                'update_rate': 1.0 / self.config.time_step,
-                'time_step': self.config.time_step,
+                'target_rtf': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
+                'actual_rtf': f"{actual_factor:.2f}x" if actual_factor > 0 else "N/A",
+                'time_step': (self.config.time_step * 1000),  # Convert to milliseconds
+                'timing_accuracy': accuracy_text,
+                'fps': 1.0 / self.config.time_step,
                 'visualization': self.config.visualization_backend if self.config.visualization else 'headless',
-                'active_robots': len(self.robots),
-                'active_objects': len(self.objects),
+                'robots': len(self.robots),
+                'objects': len(self.objects),
                 'architecture': 'Event-Driven SimPy',
                 'simulation_state': 'paused' if self._simulation_paused else 'running'
             }
@@ -1511,7 +1507,7 @@ class SimulationManager:
                 if hasattr(self.monitor, 'x11_error_count'):
                     self.monitor.x11_error_count += 1
                     if self.monitor.x11_error_count >= self.monitor.max_x11_errors:
-                        print("⚠️ Monitor experiencing too many errors, disabling...")
+                        log_warning(self.logger, "Monitor experiencing too many errors, disabling...")
                         try:
                             self.monitor.stop()
                         except:

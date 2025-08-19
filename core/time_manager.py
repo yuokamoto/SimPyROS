@@ -11,6 +11,7 @@ import time
 import threading
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
 
 
 @dataclass
@@ -52,6 +53,9 @@ class TimeManager:
         self._real_time_factor = real_time_factor
         self._strict = strict
         
+        # Setup logging
+        self.logger = get_logger('simpyros.time_manager')
+        
         # Handle special case: real_time_factor=0.0 means maximum speed (no real-time constraints)
         if real_time_factor == 0.0:
             # Use standard Environment for maximum speed (no real-time constraints)
@@ -82,21 +86,22 @@ class TimeManager:
         self._last_speed_check = 0.0
         self._speed_check_interval = 1.0  # Check every 1 second
         self._enforce_speed_limit_enabled = True  # Enable speed limiting by default
+        self._speed_limit_correction_factor = 1.0  # Default correction factor for speed limiting
         
         # Note: FrequencyController functionality moved to legacy/
         # Modern architecture uses independent SimPy processes with direct timing
         
         if self._use_realtime:
-            print(f"⏰ TimeManager: RealtimeEnvironment initialized (factor={self._real_time_factor}x)")
+            log_success(self.logger, f"TimeManager: RealtimeEnvironment initialized (factor={self._real_time_factor}x)")
         else:
-            print(f"⏰ TimeManager: Standard Environment initialized (MAX SPEED mode)")
+            log_success(self.logger, f"TimeManager: Standard Environment initialized (MAX SPEED mode)")
     
     def start_simulation(self):
         """Mark simulation as started and initialize timing"""
         with self._lock:
             self._simulation_started = True
             self._start_real_time = time.time()
-            print(f"🚀 TimeManager: Simulation started (real_time_factor={self._real_time_factor}x)")
+            log_info(self.logger, f"TimeManager: Simulation started (real_time_factor={self._real_time_factor}x)")
     
     def get_sim_time(self) -> float:
         """Get current simulation time (thread-safe)"""
@@ -142,11 +147,11 @@ class TimeManager:
                     self.env.factor = simpy_factor
             except AttributeError:
                 # Factor cannot be modified - create warning but continue
-                print(f"⚠️ Cannot modify RealtimeEnvironment factor dynamically (SimPy limitation)")
+                log_warning(self.logger, "Cannot modify RealtimeEnvironment factor dynamically (SimPy limitation)")
             except Exception as e:
-                print(f"⚠️ Factor update failed: {e}")
+                log_warning(self.logger, f"Factor update failed: {e}")
             
-        print(f"⏱️ TimeManager: Real-time factor updated: {old_factor:.2f}x → {factor:.2f}x")
+        log_info(self.logger, f"TimeManager: Real-time factor updated: {old_factor:.2f}x → {factor:.2f}x")
     
     def _enforce_speed_limit(self, actual_ratio: float):
         """
@@ -164,7 +169,7 @@ class TimeManager:
         # Apply speed reduction by slightly increasing SimPy factor (slower simulation)
         if overspeed_factor > 1.1:  # Significant overspeed (>10%)
             # Try to adjust SimPy factor to slow down simulation
-            adjustment_factor = 1.0 + (overspeed_factor - 1.0) * 0.5  # Gradual correction
+            adjustment_factor = 1.0 + (overspeed_factor - 1.0) * self._speed_limit_correction_factor  # Gradual correction
             new_simpy_factor = (1.0 / self._real_time_factor) * adjustment_factor
             
             try:
@@ -175,17 +180,17 @@ class TimeManager:
                     else:
                         self.env.factor = new_simpy_factor
                         
-                print(f"⚠️ Speed limit enforced: actual {actual_ratio:.2f}x > target {self._real_time_factor:.2f}x, adjusted SimPy factor to {new_simpy_factor:.3f}")
+                log_warning(self.logger, f"Speed limit enforced: actual {actual_ratio:.2f}x > target {self._real_time_factor:.2f}x, adjusted SimPy factor to {new_simpy_factor:.3f}")
             except AttributeError:
                 # Factor cannot be modified - this is expected in some SimPy versions
-                print(f"ℹ️ Speed limit detected but cannot adjust: actual {actual_ratio:.2f}x > target {self._real_time_factor:.2f}x (SimPy RealtimeEnvironment factor is read-only)")
+                log_info(self.logger, f"Speed limit detected but cannot adjust: actual {actual_ratio:.2f}x > target {self._real_time_factor:.2f}x (SimPy RealtimeEnvironment factor is read-only)")
             except Exception as e:
-                print(f"⚠️ Speed limit adjustment failed: {e}")
+                log_warning(self.logger, f"Speed limit adjustment failed: {e}")
     
     def set_speed_limit_enabled(self, enabled: bool):
         """Enable or disable automatic speed limiting"""
         self._enforce_speed_limit_enabled = enabled
-        print(f"🚦 Speed limiting: {'ENABLED' if enabled else 'DISABLED'}")
+        log_info(self.logger, f"Speed limiting: {'ENABLED' if enabled else 'DISABLED'}")
     
     def check_and_enforce_speed_limit(self):
         """Periodic check and enforcement of speed limits"""
@@ -250,7 +255,7 @@ class TimeManager:
             
             # Note: No frequency controllers to clear in modern architecture
             
-            print("🔄 TimeManager: Reset to initial state")
+            log_info(self.logger, "TimeManager: Reset to initial state")
 
 
 # Note: FrequencyController moved to legacy/time_management/frequency_controller.py
