@@ -16,8 +16,12 @@ import threading
 
 from core.simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
 from core.urdf_loader import URDFLoader, URDFLink, URDFJoint
+import copy
 from core.time_manager import TimeManager, get_global_time_manager
 from scipy.spatial.transform import Rotation
+
+# Global robot template cache
+_ROBOT_TEMPLATE_CACHE = {}
 
 
 class JointType(Enum):
@@ -273,8 +277,14 @@ class Robot(SimulationObject):
         self._start_robot_processes()
     
     def _load_urdf(self) -> bool:
-        """Load robot from URDF file"""
+        """Load robot from URDF file with template caching"""
         try:
+            # Check if we have a cached robot template for this URDF
+            cache_key = self._get_template_cache_key()
+            if cache_key in _ROBOT_TEMPLATE_CACHE:
+                return self._load_from_robot_template(cache_key)
+            
+            # No cache hit - perform full URDF loading
             self.urdf_loader = URDFLoader()
             
             if not self.urdf_loader.is_available():
@@ -306,6 +316,9 @@ class Robot(SimulationObject):
                 # Use the pose as specified in ObjectParameters
                 pass
             
+            # Cache the robot template for future instances
+            self._cache_robot_template(cache_key)
+            
             print(f"✅ Robot '{self.robot_name}' loaded successfully")
             print(f"   Links: {len(self.links)}, Joints: {len(self.joints)}")
             print(f"   Base link: {self.base_link_name}")
@@ -328,6 +341,74 @@ class Robot(SimulationObject):
         
         # Fallback to first link
         return self.link_names[0] if self.link_names else "unknown"
+    
+    def _get_template_cache_key(self) -> str:
+        """Generate cache key for robot template"""
+        try:
+            import os
+            mtime = os.path.getmtime(self.robot_parameters.urdf_path)
+            return f"{os.path.abspath(self.robot_parameters.urdf_path)}:{mtime}"
+        except OSError:
+            return f"{self.robot_parameters.urdf_path}:0"
+    
+    def _load_from_robot_template(self, cache_key: str) -> bool:
+        """Load robot from cached template"""
+        try:
+            template = _ROBOT_TEMPLATE_CACHE[cache_key]
+            
+            # Fast copy from template
+            self.urdf_loader = template['urdf_loader']  # Shared loader instance
+            self.robot_name = template['robot_name']
+            self.links = copy.deepcopy(template['links'])
+            self.joints = copy.deepcopy(template['joints'])
+            self.link_names = template['link_names'].copy()
+            self.joint_names = template['joint_names'].copy()
+            self.base_link_name = template['base_link_name']
+            
+            print(f"🚀 Robot '{self.robot_name}' loaded from template cache")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Robot template cache load failed: {e}")
+            # Remove corrupted cache entry
+            if cache_key in _ROBOT_TEMPLATE_CACHE:
+                del _ROBOT_TEMPLATE_CACHE[cache_key]
+            return False
+    
+    def _cache_robot_template(self, cache_key: str):
+        """Cache robot template for future instances"""
+        try:
+            _ROBOT_TEMPLATE_CACHE[cache_key] = {
+                'urdf_loader': self.urdf_loader,  # Shared loader instance
+                'robot_name': self.robot_name,
+                'links': copy.deepcopy(self.links),
+                'joints': copy.deepcopy(self.joints),
+                'link_names': self.link_names.copy(),
+                'joint_names': self.joint_names.copy(), 
+                'base_link_name': self.base_link_name,
+                'urdf_path': self.robot_parameters.urdf_path,
+                'cache_time': time.time()
+            }
+            print(f"📋 Robot template cached: {self.robot_parameters.urdf_path}")
+            
+        except Exception as e:
+            print(f"⚠️ Robot template caching failed: {e}")
+    
+    @staticmethod
+    def get_robot_template_cache_stats():
+        """Get robot template cache statistics"""
+        return {
+            'total_templates': len(_ROBOT_TEMPLATE_CACHE),
+            'cached_files': [data['urdf_path'] for data in _ROBOT_TEMPLATE_CACHE.values()],
+            'cache_size_mb': len(str(_ROBOT_TEMPLATE_CACHE)) / (1024 * 1024)
+        }
+    
+    @staticmethod
+    def clear_robot_template_cache():
+        """Clear the robot template cache"""
+        global _ROBOT_TEMPLATE_CACHE
+        _ROBOT_TEMPLATE_CACHE.clear()
+        print("🧹 Robot template cache cleared")
     
     def _start_robot_processes(self):
         """Start robot processes - unified or separate based on configuration"""
