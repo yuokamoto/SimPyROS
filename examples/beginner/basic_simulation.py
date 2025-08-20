@@ -321,83 +321,95 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
             pass
 
 
-def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, real_time_factor=1.0, visualization=False, visualization_backend='pyvista', duration=5.0):
-    """Example 4: Multi robots performance test with automatic frequency grouping
+def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, real_time_factor=10.0, visualization=False, visualization_backend='pyvista', duration=10.0):
+    """Example 4: Multi robots performance test optimized for maximum speed verification
+    
+    This function tests how fast 100 robots can be simulated and calculates the maximum 
+    achievable speed factor for robotics simulation benchmarking.
     
     Args:
-        num_robots: Number of robots to create (default: 10)
-        use_frequency_grouping: Enable frequency grouping optimization
-        real_time_factor: Real-time speed multiplier
-        visualization: Enable visualization
+        num_robots: Number of robots to create (default: 100 for maximum speed test)
+        use_frequency_grouping: Enable frequency grouping optimization (default: True for max performance)
+        real_time_factor: Real-time speed multiplier (default: 10.0 for high-speed test)
+        visualization: Enable visualization (default: False for maximum performance)
         visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
+        duration: Simulation duration in seconds (default: 10.0 for comprehensive test)
     """
-    print(f"🚀 {num_robots} Robots Performance Demo")
-    print(f"Architecture: {'Auto Frequency-Grouped' if use_frequency_grouping else 'Traditional Individual Process'}")
-    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF (Headless)'}")
-    print(f"Real-time factor: {real_time_factor}x")
-    print("=" * 40)
+    logger.info(f"🚀 {num_robots} Robots Maximum Speed Performance Test")
+    logger.info(f"Architecture: {'Auto Frequency-Grouped (Optimized)' if use_frequency_grouping else 'Traditional Individual Process'}")
+    logger.info(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF (Maximum Performance Mode)'}")
+    logger.info(f"Target real-time factor: {real_time_factor}x")
+    logger.info("=" * 50)
     
     from core.simulation_manager import SimulationManager, SimulationConfig
     import time
     
-    # Create configuration with automatic frequency grouping
+    # Create optimized configuration for maximum performance
     config = SimulationConfig(
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_rate=10.0,     # Higher update rate for better performance
+        update_rate=100.0,    # Maximum update rate for performance testing
         real_time_factor=real_time_factor,
-        enable_frequency_grouping=use_frequency_grouping  # Auto frequency grouping
+        enable_frequency_grouping=use_frequency_grouping,  # Enabled by default for optimization
+        enable_monitor=False  # Disable monitor for maximum performance
     )
     
     # Single SimulationManager handles everything automatically
     sim = SimulationManager(config)
     
     try:
-        print(f"🏗️ Creating {num_robots} robots with automatic frequency grouping...")
+        logger.info(f"🏗️ Creating {num_robots} robots with maximum performance optimization...")
         robots = []
+        creation_start_time = time.time()
         
-        # Calculate grid dimensions
+        # Calculate compact grid dimensions for 100+ robots
         grid_size = int(math.ceil(math.sqrt(num_robots)))
         
-        # Create robots with varied joint_update_rates for automatic grouping
+        # Create robots optimized for maximum performance
         for i in range(num_robots):
-            x = (i % grid_size) * 2.0  # Tighter spacing for better visualization
-            y = (i // grid_size) * 2.0
+            x = (i % grid_size) * 1.5  # Compact spacing for performance
+            y = (i // grid_size) * 1.5
             
             robot_name = f"robot_{i:03d}"
             
-            # Use only one robot type for faster loading
+            # Use lightweight mobile robot for fastest simulation
             urdf_path = "examples/robots/mobile_robot.urdf"
             
-            # Create robot without joint_update_rate parameter
+            # Create robot with optimized settings
             robot = sim.add_robot_from_urdf(
                 name=robot_name,
                 urdf_path=urdf_path,
                 initial_pose=Pose(x=x, y=y, z=0),
-                unified_process=False  # Use independent processes for reliable callback execution
+                unified_process=True  # Use unified process for maximum performance
             )
             robots.append((robot_name, robot, i))
             
-            # Progress feedback
-            if num_robots > 20 and (i + 1) % max(10, num_robots//5) == 0:
-                print(f"   Created {i+1}/{num_robots} robots...")
+            # Progress feedback for large robot counts
+            if num_robots >= 50 and (i + 1) % max(10, num_robots//10) == 0:
+                elapsed = time.time() - creation_start_time
+                rate = (i + 1) / elapsed
+                eta = (num_robots - i - 1) / rate if rate > 0 else 0
+                logger.info(f"   Created {i+1}/{num_robots} robots ({rate:.1f} robots/sec, ETA: {eta:.1f}s)")
         
-        print(f"✅ All {num_robots} robots created with automatic frequency grouping!")
+        creation_time = time.time() - creation_start_time
+        logger.info(f"✅ All {num_robots} robots created in {creation_time:.2f}s ({num_robots/creation_time:.1f} robots/sec)")
         
         # Performance tracking
         total_callbacks = 0
         start_time = time.time()
         
-        def create_auto_frequency_controller(robot_name, robot_id):
-            """Create controller that works with automatic frequency grouping"""
+        def create_optimized_controller(robot_name, robot_id):
+            """Create high-performance controller optimized for 100+ robots"""
             
-            # Pre-cache velocity objects for performance
+            # Pre-cache velocity objects for maximum performance
             velocity_cache = {
-                'forward': Velocity(linear_x=0.6, angular_z=0),
-                'left': Velocity(linear_x=0.4, angular_z=0.5),
-                'right': Velocity(linear_x=0.4, angular_z=-0.5),
-                'circular_left': Velocity(linear_x=0.5, angular_z=0.3),
-                'circular_right': Velocity(linear_x=0.5, angular_z=-0.3),
+                'forward_fast': Velocity(linear_x=1.0, angular_z=0),
+                'circular_left': Velocity(linear_x=0.8, angular_z=0.6),
+                'circular_right': Velocity(linear_x=0.8, angular_z=-0.6),
+                'turn_left': Velocity(linear_x=0.3, angular_z=0.8),
+                'turn_right': Velocity(linear_x=0.3, angular_z=-0.8),
+                'zigzag_left': Velocity(linear_x=0.6, angular_z=0.4),
+                'zigzag_right': Velocity(linear_x=0.6, angular_z=-0.4),
                 'stop': Velocity(linear_x=0, angular_z=0)
             }
             
@@ -407,139 +419,187 @@ def multi_robots_performance_demo(num_robots=10, use_frequency_grouping=False, r
                 
                 t = sim.get_sim_time()
                 
-                # Debug: Print for first few callbacks of first few robots
-                if robot_id < 3 and total_callbacks <= 5:
-                    print(f"🤖 Robot{robot_id} Callback #{total_callbacks}: t={t:.2f}s, dt={dt:.4f}s")
+                # Minimal debug output for performance (only first few robots)
+                if robot_id < 2 and total_callbacks <= 3:
+                    logger.debug(f"🤖 Robot{robot_id:03d} Callback #{total_callbacks}: t={t:.2f}s")
                 
-                # High-performance pattern selection using bit operations
-                pattern = (robot_id + int(t * 2.0)) & 7  # Dynamic pattern based on time
+                # Ultra-fast pattern selection using bitwise operations for maximum performance
+                time_factor = int(t * 3.0)  # Faster pattern changes
+                pattern = (robot_id * 3 + time_factor) & 7  # 8 different patterns
                 
-                # Use pre-cached velocity objects for different movement patterns
-                if pattern < 2:  # Forward motion
-                    velocity = velocity_cache['forward']
-                elif pattern < 4:  # Circular motion
-                    velocity = velocity_cache['circular_left'] if robot_id % 2 == 0 else velocity_cache['circular_right']
-                elif pattern < 6:  # Turn motion
-                    velocity = velocity_cache['left'] if robot_id % 2 == 0 else velocity_cache['right']
-                else:  # Stop
-                    velocity = velocity_cache['stop']
+                # Select movement pattern for maximum variety and performance
+                if pattern == 0:
+                    velocity = velocity_cache['forward_fast']
+                elif pattern == 1:
+                    velocity = velocity_cache['circular_left']
+                elif pattern == 2:
+                    velocity = velocity_cache['circular_right']
+                elif pattern == 3:
+                    velocity = velocity_cache['turn_left']
+                elif pattern == 4:
+                    velocity = velocity_cache['turn_right']
+                elif pattern == 5:
+                    velocity = velocity_cache['zigzag_left']
+                elif pattern == 6:
+                    velocity = velocity_cache['zigzag_right']
+                else:  # pattern == 7
+                    velocity = velocity_cache['forward_fast']  # Keep moving for performance test
                 
                 sim.set_robot_velocity(robot_name, velocity)
             
             return controller
         
-        # Set up control callbacks - SimulationManager handles frequency grouping automatically
-        print("🎮 Setting up controllers with automatic frequency grouping...")
+        # Set up control callbacks optimized for maximum performance
+        logger.info("🎮 Setting up high-performance controllers...")
+        setup_start_time = time.time()
         
         for robot_name, robot_instance, robot_id in robots:
-            # Create controller (frequency grouping handled automatically by SimulationManager)
-            controller = create_auto_frequency_controller(robot_name, robot_id)
+            # Create optimized controller for maximum performance
+            controller = create_optimized_controller(robot_name, robot_id)
             
-            # Use standard frequency for all robots
-            robot_frequency = 10.0
+            # Use higher frequency for performance testing
+            robot_frequency = 20.0  # Higher frequency for intensive testing
             
-            # Set callback - SimulationManager handles frequency grouping automatically
+            # Set callback with performance optimization
             sim.set_robot_control_callback(robot_name, controller, frequency=robot_frequency)
         
-        print(f"🚀 Starting {num_robots}-robot simulation...")
-        if use_frequency_grouping:
-            print("✨ Automatic frequency grouping enabled - SimulationManager will optimize processes")
-        else:
-            print("🔧 Traditional individual processes mode")
+        setup_time = time.time() - setup_start_time
+        logger.info(f"✅ All controllers set up in {setup_time:.2f}s")
         
-        # Run simulation
-        print(f"Running for {duration}s...")
+        logger.info(f"🚀 Starting {num_robots}-robot maximum performance simulation...")
+        if use_frequency_grouping:
+            logger.info("✨ Frequency grouping optimization enabled for maximum performance")
+        else:
+            logger.info("🔧 Individual processes mode (less optimal for 100+ robots)")
+        
+        # Run simulation with performance monitoring
+        logger.info(f"🏃 Running maximum speed test for {duration}s...")
+        actual_start_time = time.time()
         
         sim.run(duration=duration, auto_close=True)
         
-        # Calculate performance metrics
-        elapsed_time = time.time() - start_time
+        # Calculate comprehensive performance metrics
+        actual_elapsed_time = time.time() - actual_start_time
         sim_time = sim.get_sim_time()
+        speed_factor_achieved = sim_time / actual_elapsed_time
         
-        print(f"\n📊 {num_robots}-Robot Performance Results:")
-        print(f"   Simulation time: {sim_time:.2f}s")
-        print(f"   Wall clock time: {elapsed_time:.2f}s") 
-        print(f"   Total control callbacks: {total_callbacks:,}")
-        print(f"   Average callback rate: {total_callbacks/elapsed_time:.1f} Hz")
-        print(f"   Per-robot avg rate: {total_callbacks/elapsed_time/num_robots:.1f} Hz")
+        logger.info(f"\n🏆 {num_robots}-Robot Maximum Performance Results:")
+        logger.info("=" * 60)
+        logger.info(f"📊 Simulation Metrics:")
+        logger.info(f"   Target simulation time: {duration:.2f}s")
+        logger.info(f"   Actual simulation time: {sim_time:.2f}s")
+        logger.info(f"   Wall clock time: {actual_elapsed_time:.2f}s")
+        logger.info(f"   🚀 ACHIEVED SPEED FACTOR: {speed_factor_achieved:.2f}x")
+        logger.info(f"   Target speed factor: {real_time_factor:.2f}x")
+        logger.info(f"   Speed efficiency: {(speed_factor_achieved/real_time_factor)*100:.1f}%")
+        logger.info(f"")
+        logger.info(f"📈 Callback Performance:")
+        logger.info(f"   Total control callbacks: {total_callbacks:,}")
+        logger.info(f"   Average callback rate: {total_callbacks/actual_elapsed_time:.1f} Hz")
+        logger.info(f"   Per-robot callback rate: {total_callbacks/actual_elapsed_time/num_robots:.2f} Hz")
+        logger.info(f"   Expected callbacks: {num_robots * 20.0 * duration:,.0f} (at 20Hz per robot)")
+        logger.info(f"   Callback efficiency: {(total_callbacks/(num_robots * 20.0 * duration))*100:.1f}%")
         
-        # Architecture-specific information  
+        # Detailed architecture performance analysis  
+        logger.info(f"🔧 Architecture Analysis:")
         if use_frequency_grouping:
-            print(f"   Architecture: Auto Frequency-Grouped")
+            logger.info(f"   Architecture: Frequency-Grouped Optimization")
             
-            # Get automatic frequency grouping stats
+            # Get detailed frequency grouping statistics
             if hasattr(sim, 'get_frequency_grouping_stats'):
                 freq_stats = sim.get_frequency_grouping_stats()
                 if freq_stats.get('enabled'):
-                    print(f"   Frequency groups created: {freq_stats['total_groups']}")
-                    print(f"   Process reduction: {freq_stats['process_reduction_percent']:.1f}%")
-                    print(f"   Frequency distribution:")
+                    logger.info(f"   Frequency groups created: {freq_stats['total_groups']}")
+                    logger.info(f"   Process reduction: {freq_stats['process_reduction_percent']:.1f}%")
+                    logger.info(f"   Frequency distribution:")
                     for freq, group_info in freq_stats.get('groups', {}).items():
-                        robot_count = group_info['robot_count']
-                        total_calls = group_info['total_calls']
-                        print(f"     {freq:5.1f} Hz: {robot_count:3d} robots, {total_calls:,} calls")
+                        robot_count = group_info.get('robot_count', 0)
+                        total_calls = group_info.get('total_calls', 0)
+                        logger.info(f"     {freq:5.1f} Hz: {robot_count:3d} robots, {total_calls:,} calls")
         else:
-            print(f"   Architecture: Traditional Individual Processes ({num_robots} processes)")
+            logger.info(f"   Architecture: Individual Processes ({num_robots} separate processes)")
             
-        # Show simulation info with frequency grouping details
+        # System performance analysis
         sim_info = sim.get_simulation_info()
         if 'frequency_grouping' in sim_info and sim_info['frequency_grouping']['enabled']:
             fg_info = sim_info['frequency_grouping']
-            print(f"   Total processes: {fg_info['groups']} (vs {fg_info['total_robots']} traditional)")
-            print(f"   Active frequencies: {fg_info['frequencies']}")
+            logger.info(f"   Actual processes: {fg_info['groups']} (vs {fg_info['total_robots']} without optimization)")
+            logger.info(f"   Active frequencies: {fg_info['frequencies']}")
         
-        # Get timing stats if available
+        # Timing accuracy analysis
         if hasattr(sim, 'get_timing_stats'):
             timing_stats = sim.get_timing_stats()
             if timing_stats:
-                print(f"   TimeManager stats:")
+                logger.info(f"   📊 TimeManager Performance:")
                 for key, value in timing_stats.items():
-                    print(f"     {key}: {value}")
+                    logger.info(f"     {key}: {value}")
         
-        # Performance assessment
-        callbacks_per_robot_per_sec = total_callbacks / elapsed_time / num_robots
-        if callbacks_per_robot_per_sec > 15.0:
-            rating = "🚀 ULTRA-FAST"
-        elif callbacks_per_robot_per_sec > 10.0:
-            rating = "⚡ EXCELLENT"
-        elif callbacks_per_robot_per_sec > 8.0:
-            rating = "✅ VERY GOOD"
-        elif callbacks_per_robot_per_sec > 5.0:
-            rating = "✅ GOOD"
-        elif callbacks_per_robot_per_sec > 2.0:
-            rating = "⚠️ FAIR"
+        # Performance rating and recommendations
+        callbacks_per_robot_per_sec = total_callbacks / actual_elapsed_time / num_robots
+        if speed_factor_achieved > 20.0:
+            rating = "🚀 ULTRA-FAST (>20x)"
+            recommendation = "Exceptional performance! Try even higher targets."
+        elif speed_factor_achieved > 10.0:
+            rating = "⚡ EXCELLENT (>10x)"
+            recommendation = "Outstanding performance for 100-robot simulation."
+        elif speed_factor_achieved > 5.0:
+            rating = "✅ VERY GOOD (>5x)"
+            recommendation = "Strong performance, consider frequency grouping optimization."
+        elif speed_factor_achieved > 2.0:
+            rating = "✅ GOOD (>2x)"
+            recommendation = "Acceptable performance, monitor system resources."
+        elif speed_factor_achieved > 1.0:
+            rating = "⚠️ FAIR (>1x)"
+            recommendation = "Enable frequency grouping and reduce visualization."
         else:
-            rating = "❌ POOR"
+            rating = "❌ POOR (<1x)"
+            recommendation = "Disable visualization, enable optimization, reduce robot count."
         
-        print(f"   {rating}: {callbacks_per_robot_per_sec:.1f} Hz per robot")
-            
-        # Calculate process reduction based on actual frequency groups created
+        logger.info(f"")
+        logger.info(f"🏁 FINAL ASSESSMENT: {rating}")
+        logger.info(f"💡 Recommendation: {recommendation}")
+        logger.info(f"   Per-robot callback efficiency: {callbacks_per_robot_per_sec:.2f} Hz")
+        
+        # Calculate optimization statistics
         process_reduction = 0
         num_processes = num_robots  # Default to traditional count
         
         if use_frequency_grouping and hasattr(sim, 'get_frequency_grouping_stats'):
             freq_stats = sim.get_frequency_grouping_stats()
             if freq_stats.get('enabled'):
-                process_reduction = freq_stats['process_reduction_percent']
-                num_processes = freq_stats['total_groups']
+                process_reduction = freq_stats.get('process_reduction_percent', 0)
+                num_processes = freq_stats.get('total_groups', num_robots)
         
+        # Return comprehensive performance data
         return {
             'num_robots': num_robots,
             'frequency_grouped': use_frequency_grouping,
             'num_processes': num_processes,
+            'target_duration': duration,
             'simulation_time': sim_time,
-            'wall_time': elapsed_time,
+            'wall_time': actual_elapsed_time,
+            'speed_factor_achieved': speed_factor_achieved,
+            'target_speed_factor': real_time_factor,
+            'speed_efficiency_percent': (speed_factor_achieved/real_time_factor)*100,
             'total_callbacks': total_callbacks,
-            'avg_callback_rate': total_callbacks/elapsed_time,
-            'per_robot_rate': callbacks_per_robot_per_sec,
-            'process_reduction_percent': process_reduction
+            'avg_callback_rate': total_callbacks/actual_elapsed_time,
+            'per_robot_callback_rate': callbacks_per_robot_per_sec,
+            'callback_efficiency_percent': (total_callbacks/(num_robots * 20.0 * duration))*100,
+            'process_reduction_percent': process_reduction,
+            'performance_rating': rating,
+            'recommendation': recommendation
         }
         
     except Exception as e:
-        print(f"❌ {num_robots}-robot demo failed: {e}")
+        logger.error(f"❌ {num_robots}-robot maximum performance test failed: {e}")
         import traceback
         traceback.print_exc()
-        return None
+        return {
+            'num_robots': num_robots,
+            'error': str(e),
+            'performance_rating': "❌ FAILED",
+            'recommendation': "Check system resources and reduce robot count for debugging."
+        }
     finally:
         try:
             sim.shutdown()
@@ -610,8 +670,8 @@ def main():
                        help='Real-time speed multiplier (default: 1.0)')
     parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all',
                        help='Which example to run (default: all)')
-    parser.add_argument('--num-robots', type=int, default=10,
-                       help='Number of robots for performance demo (default: 10)')
+    parser.add_argument('--num-robots', type=int, default=100,
+                       help='Number of robots for performance demo (default: 100)')
     parser.add_argument('--frequency-grouping', action='store_true',
                        help='Enable frequency grouping optimization for performance demo')
     parser.add_argument('--duration', type=float, default=5.0,
@@ -627,8 +687,8 @@ def main():
     print(f"Real-time factor: {args.real_time_factor}x")
     print("=" * 60)
     
-    # Configurable robot count for performance testing
-    robot_count = 100  # Start with smaller number for testing
+    # Default to 100 robots for maximum performance testing
+    robot_count = 100  # Optimized for maximum speed verification
     
     # Use command line parameters
     default_visualization = args.visualization
