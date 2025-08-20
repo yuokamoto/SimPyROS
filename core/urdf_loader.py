@@ -27,6 +27,7 @@ import warnings
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from core.simulation_object import Pose
+from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
 from scipy.spatial.transform import Rotation
 import copy
 import time
@@ -39,9 +40,12 @@ try:
     import yourdfpy as urdf_lib
     URDF_LIBRARY = "yourdfpy"
     URDF_MODULE = urdf_lib
-    print("✅ Using yourdfpy for URDF parsing")
+    # Initialize logger after import
+    _module_logger = get_logger(__name__)
+    log_success(_module_logger, "Using yourdfpy for URDF parsing")
 except ImportError:
-    print("❌ yourdfpy not available. Install with: pip install yourdfpy")
+    _module_logger = get_logger(__name__)
+    log_error(_module_logger, "yourdfpy not available. Install with: pip install yourdfpy")
 
 # Try trimesh for mesh handling
 try:
@@ -101,6 +105,9 @@ class URDFLoader:
         # Template caching settings
         self.use_template_cache = use_template_cache
         
+        # Initialize logger for this instance
+        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
+        
     def is_available(self) -> bool:
         """Check if URDF loading is available"""
         return URDF_LIBRARY is not None
@@ -112,11 +119,11 @@ class URDFLoader:
     def load_urdf(self, urdf_path: str) -> bool:
         """Load URDF file with enhanced mesh support and template caching"""
         if not self.is_available():
-            print("❌ No URDF parsing library available")
+            log_error(self.logger, "No URDF parsing library available")
             return False
             
         if not os.path.exists(urdf_path):
-            print(f"❌ URDF file not found: {urdf_path}")
+            log_error(self.logger, f"URDF file not found: {urdf_path}")
             return False
         
         # Store URDF directory for relative path resolution
@@ -138,26 +145,26 @@ class URDFLoader:
                     self._cache_template(cache_key, abs_urdf_path)
                 return success
             else:
-                print(f"❌ Unsupported URDF library: {URDF_LIBRARY}")
+                log_error(self.logger, f"Unsupported URDF library: {URDF_LIBRARY}")
                 return False
                 
         except Exception as e:
-            print(f"❌ URDF loading failed: {e}")
+            log_error(self.logger, f"URDF loading failed: {e}")
             return False
     
     def _load_with_yourdfpy(self, urdf_path: str) -> bool:
         """Load URDF using yourdfpy"""
         try:
-            print(f"🔄 Loading URDF with yourdfpy: {urdf_path}")
+            log_info(self.logger, f"Loading URDF with yourdfpy: {urdf_path}")
             self.urdf_object = urdf_lib.URDF.load(urdf_path)
             self.robot_name = getattr(self.urdf_object, 'name', 'unknown_robot')
             
             self._extract_links_joints_yourdfpy()
             
-            print(f"✅ Successfully loaded with yourdfpy")
+            log_success(self.logger, "Successfully loaded with yourdfpy")
             return True
         except Exception as e:
-            print(f"❌ yourdfpy loading failed: {e}")
+            log_error(self.logger, f"yourdfpy loading failed: {e}")
             return False
     
     def _get_cache_key(self, urdf_path: str) -> str:
@@ -177,10 +184,10 @@ class URDFLoader:
             self.links = copy.deepcopy(cached_data['links'])
             self.joints = copy.deepcopy(cached_data['joints'])
             self._urdf_dir = cached_data['urdf_dir']
-            print(f"🚀 Loaded from template cache: {cached_data['urdf_path']}")
+            log_info(self.logger, f"Loaded from template cache: {cached_data['urdf_path']}")
             return True
         except Exception as e:
-            print(f"⚠️ Template cache load failed: {e}")
+            log_warning(self.logger, f"Template cache load failed: {e}")
             # Remove corrupted cache entry
             if cache_key in _URDF_TEMPLATE_CACHE:
                 del _URDF_TEMPLATE_CACHE[cache_key]
@@ -198,9 +205,9 @@ class URDFLoader:
                 'urdf_path': urdf_path,
                 'cache_time': time.time()
             }
-            print(f"📋 Cached URDF template: {urdf_path}")
+            log_info(self.logger, f"Cached URDF template: {urdf_path}")
         except Exception as e:
-            print(f"⚠️ Template caching failed: {e}")
+            log_warning(self.logger, f"Template caching failed: {e}")
     
     @staticmethod
     def get_cache_stats() -> Dict[str, Any]:
@@ -216,7 +223,8 @@ class URDFLoader:
         """Clear the entire template cache"""
         global _URDF_TEMPLATE_CACHE
         _URDF_TEMPLATE_CACHE.clear()
-        print("🧹 URDF template cache cleared")
+        # Use module logger for static method
+        log_info(_module_logger, "URDF template cache cleared")
     
     def _extract_links_joints_yourdfpy(self):
         """Extract links and joints from yourdfpy URDF object"""
@@ -319,7 +327,7 @@ class URDFLoader:
         child_link = getattr(joint, 'child', 'unknown')
         
         # Debug output for joint type  
-        print(f"  Joint {joint.name}: type={joint_type}, parent={parent_link}, child={child_link}")
+        log_debug(self.logger, f"Joint {joint.name}: type={joint_type}, parent={parent_link}, child={child_link}")
         
         # Extract axis and limits
         axis = getattr(joint, 'axis', None)
@@ -352,7 +360,7 @@ class URDFLoader:
         pos_str = f"pos={origin_pos}"
         rot_euler = origin_rot.as_euler('xyz', degrees=True)
         rot_str = f"rot={rot_euler}°"
-        print(f"  Joint {joint.name} origin: {pos_str}, {rot_str}")
+        log_debug(self.logger, f"Joint {joint.name} origin: {pos_str}, {rot_str}")
         
         self.joints[joint.name] = urdf_joint
     
@@ -386,7 +394,7 @@ class URDFLoader:
                 for path in potential_paths:
                     abs_path = os.path.abspath(path)
                     if os.path.exists(abs_path):
-                        print(f"  🔗 Resolved package path: {mesh_path} -> {abs_path}")
+                        log_debug(self.logger, f"Resolved package path: {mesh_path} -> {abs_path}")
                         return abs_path
         
         # Handle absolute paths
@@ -399,7 +407,7 @@ class URDFLoader:
             if os.path.exists(relative_path):
                 return os.path.abspath(relative_path)
         
-        print(f"⚠️ Could not resolve mesh path: {mesh_path}")
+        log_warning(self.logger, f"Could not resolve mesh path: {mesh_path}")
         return None
     
     def _analyze_mesh_file(self, mesh_path: str) -> Dict:
@@ -443,19 +451,19 @@ class URDFLoader:
                         if metadata['face_count'] > self.max_mesh_faces:
                             metadata['needs_simplification'] = True
                             
-                        print(f"    📊 Mesh: {metadata['vertex_count']} vertices, "
+                        log_debug(self.logger, f"Mesh: {metadata['vertex_count']} vertices, "
                               f"{metadata['face_count']} faces, {metadata['file_size_mb']} MB")
                     else:
-                        print(f"    ⚠️ Loaded mesh has no geometry data")
+                        log_warning(self.logger, "Loaded mesh has no geometry data")
                 except Exception as e:
-                    print(f"    ⚠️ Mesh analysis failed: {e}")
+                    log_warning(self.logger, f"Mesh analysis failed: {e}")
             else:
                 # Assume loadable if trimesh not available
                 metadata['loadable'] = True
-                print(f"    📁 Mesh file found: {os.path.basename(mesh_path)} ({metadata['file_size_mb']} MB)")
+                log_debug(self.logger, f"Mesh file found: {os.path.basename(mesh_path)} ({metadata['file_size_mb']} MB)")
             
         except Exception as e:
-            print(f"    ❌ Could not analyze mesh file {mesh_path}: {e}")
+            log_error(self.logger, f"Could not analyze mesh file {mesh_path}: {e}")
         
         return metadata
     
@@ -491,7 +499,7 @@ class URDFLoader:
                         rotation_matrix = origin_matrix[:3, :3]
                         origin_rot = Rotation.from_matrix(rotation_matrix)
             except Exception as e:
-                print(f"    ⚠️ Warning: Could not process visual origin for {urdf_link.name}: {e}")
+                log_warning(self.logger, f"Could not process visual origin for {urdf_link.name}: {e}")
         
         # Store pose in URDFLink
         urdf_link.pose = Pose.from_position_rotation(origin_pos, origin_rot)
@@ -501,7 +509,7 @@ class URDFLoader:
             pos_str = f"pos={origin_pos}"
             rot_euler = origin_rot.as_euler('xyz', degrees=True)
             rot_str = f"rot={rot_euler}°"
-            print(f"    📍 Visual origin for {urdf_link.name}: {pos_str}, {rot_str}")
+            log_debug(self.logger, f"Visual origin for {urdf_link.name}: {pos_str}, {rot_str}")
     
     def _extract_material_info(self, visual, urdf_link: URDFLink):
         """Enhanced material and color extraction with opacity fix"""
@@ -515,7 +523,7 @@ class URDFLoader:
                         # Keep RGB, set alpha to 1.0 for opaque rendering
                         fixed_rgba = (rgba[0], rgba[1], rgba[2], 1.0)
                         urdf_link.color = fixed_rgba
-                        print(f"    🎨 Material color for {urdf_link.name}: rgba={rgba} -> fixed={fixed_rgba}")
+                        log_debug(self.logger, f"Material color for {urdf_link.name}: rgba={rgba} -> fixed={fixed_rgba}")
                     else:
                         urdf_link.color = tuple(rgba) + (1.0,)  # Add opaque alpha
                     return
@@ -585,7 +593,7 @@ class URDFLoader:
                             )
                             if simplified_mesh is not None:
                                 trimesh_mesh = simplified_mesh
-                                print(f"    🔄 Simplified mesh: {original_faces} -> {len(trimesh_mesh.faces)} faces")
+                                log_info(self.logger, f"Simplified mesh: {original_faces} -> {len(trimesh_mesh.faces)} faces")
                         
                         # Convert to PyVista
                         if hasattr(trimesh_mesh, 'vertices') and hasattr(trimesh_mesh, 'faces'):
@@ -595,11 +603,11 @@ class URDFLoader:
                     else:
                         # Fallback to box
                         pv_mesh = pv_module.Cube()
-                        print(f"⚠️  Mesh file not loaded (trimesh unavailable): {link.mesh_path}")
+                        log_warning(self.logger, f"Mesh file not loaded (trimesh unavailable): {link.mesh_path}")
                 except Exception as e:
                     # Fallback to box
                     pv_mesh = pv_module.Cube()
-                    print(f"⚠️  Mesh loading failed: {e}")
+                    log_warning(self.logger, f"Mesh loading failed: {e}")
             
             # Apply transformation if mesh was created successfully
             if pv_mesh is not None and link_name in link_poses:
@@ -618,9 +626,9 @@ class URDFLoader:
             
             # Debug output
             if pv_mesh is not None:
-                print(f"  Created {link.geometry_type} mesh for {link_name} with color {link.color[:3]}")
+                log_debug(self.logger, f"Created {link.geometry_type} mesh for {link_name} with color {link.color[:3]}")
         
-        print(f"✅ Created {len(meshes)} individual meshes")
+        log_success(self.logger, f"Created {len(meshes)} individual meshes")
         return meshes
     
     def _compute_link_poses(self):
@@ -634,7 +642,7 @@ class URDFLoader:
             Rotation.identity()
         )
         
-        print(f"  Root link: {root_link} at origin")
+        log_debug(self.logger, f"Root link: {root_link} at origin")
         
         # Recursively compute poses for all connected links
         self._compute_child_poses(root_link, link_poses[root_link], link_poses)
@@ -670,7 +678,7 @@ class URDFLoader:
                 pos_str = f"pos={child_pose.position}"
                 rot_euler = child_pose.rotation.as_euler('xyz', degrees=True)
                 rot_str = f"rot={rot_euler}°"
-                print(f"  Link {joint.child_link}: {pos_str}, {rot_str}, joint={joint.name}")
+                log_debug(self.logger, f"Link {joint.child_link}: {pos_str}, {rot_str}, joint={joint.name}")
                 
                 # Recursively compute poses for children of this link
                 self._compute_child_poses(joint.child_link, child_pose, link_poses)
@@ -684,19 +692,19 @@ class URDFLoader:
         
     def print_info(self):
         """Print comprehensive robot information"""
-        print(f"\n🤖 Robot Information")
-        print(f"Library: {URDF_LIBRARY}")
-        print(f"Name: {self.robot_name}")
-        print(f"Links: {len(self.links)}")
-        print(f"Joints: {len(self.joints)}")
+        log_info(self.logger, "\n🤖 Robot Information")
+        log_info(self.logger, f"Library: {URDF_LIBRARY}")
+        log_info(self.logger, f"Name: {self.robot_name}")
+        log_info(self.logger, f"Links: {len(self.links)}")
+        log_info(self.logger, f"Joints: {len(self.joints)}")
         
-        print(f"\n📦 Links:")
+        log_info(self.logger, "\n📦 Links:")
         for name, link in self.links.items():
-            print(f"  - {name}: {link.geometry_type}")
+            log_info(self.logger, f"  - {name}: {link.geometry_type}")
             
-        print(f"\n🔗 Joints:")
+        log_info(self.logger, "\n🔗 Joints:")
         for name, joint in self.joints.items():
-            print(f"  - {name}: {joint.joint_type} ({joint.parent_link} → {joint.child_link})")
+            log_info(self.logger, f"  - {name}: {joint.joint_type} ({joint.parent_link} → {joint.child_link})")
     
     def get_combined_mesh(self, pv_module):
         """Create a single combined PyVista mesh (legacy support)"""
@@ -722,11 +730,12 @@ def is_urdf_loader_available() -> bool:
 
 def print_urdf_loader_info():
     """Print information about available URDF loading capabilities"""
-    print(f"\n📄 URDF Loader Information")
-    print(f"Available: {is_urdf_loader_available()}")
+    module_logger = get_logger(f"{__name__}.info")
+    log_info(module_logger, "\n📄 URDF Loader Information")
+    log_info(module_logger, f"Available: {is_urdf_loader_available()}")
     if is_urdf_loader_available():
-        print(f"Library: {URDF_LIBRARY}")
-        print(f"Trimesh: {'Available' if TRIMESH_AVAILABLE else 'Not available'}")
+        log_info(module_logger, f"Library: {URDF_LIBRARY}")
+        log_info(module_logger, f"Trimesh: {'Available' if TRIMESH_AVAILABLE else 'Not available'}")
     else:
-        print("Install with: pip install yourdfpy")
-        print("Optional: pip install trimesh  # for mesh file support")
+        log_info(module_logger, "Install with: pip install yourdfpy")
+        log_info(module_logger, "Optional: pip install trimesh  # for mesh file support")

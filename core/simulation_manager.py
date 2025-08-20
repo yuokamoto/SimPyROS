@@ -272,7 +272,7 @@ class SimulationManager:
                 
                 # Check availability and setup
                 if self.visualizer.available:
-                    print(f"✅ {backend} visualization system initialized")
+                    log_success(self.logger, f"{backend} visualization system initialized")
                     
                     # Print backend-specific info
                     if backend == 'meshcat':
@@ -538,12 +538,12 @@ class SimulationManager:
             while time.time() - start_time < duration and not self._shutdown_requested:
                 # Use much smaller timeout to maintain simulation responsiveness
                 yield self.env.timeout(0.01)  # Check every 10ms in simulation time
-            print(f"\n⏰ Wall time duration {duration}s completed - closing visualization")
+            log_info(self.logger, f"Wall time duration {duration}s completed - closing visualization")
         else:
             # Simulation time mode (default): wait for simulation time duration
             # The RealtimeEnvironment will automatically adjust wall time based on real_time_factor
             yield self.env.timeout(duration)
-            print(f"\n⏰ Simulation time duration {duration}s completed - closing visualization")
+            log_info(self.logger, f"Simulation time duration {duration}s completed - closing visualization")
             
         self._shutdown_requested = True
         if self.visualizer and hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
@@ -642,16 +642,16 @@ class SimulationManager:
             return False
         
         log_info(self.logger, "Starting simulation...")
-        print(f"   Robots: {len(self.robots)}")
-        print(f"   Objects: {len(self.objects)}")
-        print(f"   Update rate: {self.config.update_rate} Hz")
+        log_info(self.logger, f"Robots: {len(self.robots)}")
+        log_info(self.logger, f"Objects: {len(self.objects)}")
+        log_info(self.logger, f"Update rate: {self.config.update_rate} Hz")
         if self.config.real_time_factor == 0.0:
-            print("   Real time factor: MAX SPEED (0.0)")
+            log_info(self.logger, "Real time factor: MAX SPEED (0.0)")
         else:
-            print(f"   Real time factor: {self.config.real_time_factor}x")
-        print(f"   Visualization: {'On' if self.config.visualization else 'Off'}")
-        print("   Press Ctrl+C to stop")
-        print("=" * 50)
+            log_info(self.logger, f"Real time factor: {self.config.real_time_factor}x")
+        log_info(self.logger, f"Visualization: {'On' if self.config.visualization else 'Off'}")
+        log_info(self.logger, "Press Ctrl+C to stop")
+        log_info(self.logger, "=" * 50)
         
         self._running = True
         self._start_time = time.time()
@@ -690,9 +690,9 @@ class SimulationManager:
                 if duration:
                     simulation_end_time = self.env.now + duration
                     if auto_close:
-                        print(f"🕐 Simulation will run for {duration}s, then auto-close")
+                        log_info(self.logger, f"Simulation will run for {duration}s, then auto-close")
                     else:
-                        print(f"🕐 Simulation will run for {duration}s, but window stays open")
+                        log_info(self.logger, f"Simulation will run for {duration}s, but window stays open")
                 
                 if not is_process_separated:
                     # Standard visualizers (PyVista with plotter)
@@ -728,7 +728,7 @@ class SimulationManager:
                 
                 if is_process_separated:
                     # Process-separated or headless mode
-                    print(f"⚡ Running with process-separated visualization")
+                    log_info(self.logger, "Running with process-separated visualization")
                     
                     try:
                         while not self._shutdown_requested:
@@ -751,9 +751,9 @@ class SimulationManager:
                     duration_process = self.env.process(self._duration_monitor(duration, duration_mode))
                     
                     if duration_mode == 'wall_time':
-                        print(f"🕐 Headless simulation will run for {duration}s wall time (regardless of RTF {self.config.real_time_factor}x)")
+                        log_info(self.logger, f"Headless simulation will run for {duration}s wall time (regardless of RTF {self.config.real_time_factor}x)")
                     else:
-                        print(f"🕐 Headless simulation will run for {duration}s simulation time (RTF {self.config.real_time_factor}x → ~{duration/self.config.real_time_factor:.1f}s wall time)")
+                        log_info(self.logger, f"Headless simulation will run for {duration}s simulation time (RTF {self.config.real_time_factor}x → ~{duration/self.config.real_time_factor:.1f}s wall time)")
                     
                     # Run SimPy environment until duration expires - let RealtimeEnvironment handle timing
                     try:
@@ -765,9 +765,9 @@ class SimulationManager:
                             self.env.run(until=self.env.now + duration + 0.1)  # Allow slight buffer
                     except simpy.core.EmptySchedule:
                         # All processes finished naturally
-                        print(f"\n⏰ Headless simulation completed naturally")
+                        log_info(self.logger, "Headless simulation completed naturally")
                         
-                    print(f"\n⏰ Headless simulation duration ({duration}s {duration_mode}) completed")
+                    log_info(self.logger, f"Headless simulation duration ({duration}s {duration_mode}) completed")
                 else:
                     try:
                         # Infinite headless simulation
@@ -788,7 +788,7 @@ class SimulationManager:
     def _handle_simulation_end(self, duration: float, auto_close: bool):
         """Handle simulation end for both visualization modes"""
         if not hasattr(self, '_simulation_ended'):
-            print(f"\n⏰ Simulation time ({duration}s) completed")
+            log_info(self.logger, f"Simulation time ({duration}s) completed")
             self._simulation_ended = True
             self._running = False  # Stop simulation callbacks
             
@@ -833,7 +833,7 @@ class SimulationManager:
         if hasattr(self, 'visualizer') and self.visualizer and hasattr(self.visualizer, 'realtime_factor'):
             if abs(self.visualizer.realtime_factor - factor) > 0.01:
                 self.visualizer.realtime_factor = factor
-                print(f"🔄 Synchronized visualizer real-time factor: {factor:.2f}x")
+                log_debug(self.logger, f"Synchronized visualizer real-time factor: {factor:.2f}x")
     
     def get_realtime_factor(self) -> float:
         """Get current real-time factor"""
@@ -845,7 +845,7 @@ class SimulationManager:
         """Enable or disable automatic speed limiting to prevent actual speed from exceeding target"""
         if self.time_manager:
             self.time_manager.set_speed_limit_enabled(enabled)
-            print(f"🚦 SimulationManager: Speed limiting {'ENABLED' if enabled else 'DISABLED'}")
+            log_info(self.logger, f"Speed limiting {'ENABLED' if enabled else 'DISABLED'}")
         else:
             log_warning(self.logger, "TimeManager not available - speed limiting not available")
     
@@ -1047,12 +1047,12 @@ class SimulationManager:
             except Exception:
                 pass
         
-        # Print performance statistics
+        # Log performance statistics
         if self._start_time > 0:
             elapsed = time.time() - self._start_time
             avg_fps = self._frame_count / elapsed if elapsed > 0 else 0
-            print(f"📊 Simulation ran for {elapsed:.1f}s")
-            print(f"📊 Average update rate: {avg_fps:.1f} Hz")
+            log_info(self.logger, f"Simulation ran for {elapsed:.1f}s")
+            log_info(self.logger, f"Average update rate: {avg_fps:.1f} Hz")
         
         # Final multiprocessing resource cleanup
         try:
@@ -1132,9 +1132,9 @@ class SimulationManager:
         self.frequency_groups[frequency]['robot_updates'].append(robot_update_info)
         self.robot_frequencies[name] = frequency
         
-        print(f"🔄 Added robot '{name}' to {frequency} Hz frequency group "
+        log_debug(self.logger, f"Added robot '{name}' to {frequency} Hz frequency group "
               f"({len(self.frequency_groups[frequency]['robots'])} robots in group)")
-        print(f"   ↳ Robot internal updates will be grouped at {frequency} Hz")
+        log_debug(self.logger, f"Robot internal updates will be grouped at {frequency} Hz")
     
     def _add_callback_to_frequency_group(self, name: str, callback: Callable, frequency: float):
         """Add control callback to appropriate frequency group"""
@@ -1164,7 +1164,7 @@ class SimulationManager:
         }
         
         self.frequency_groups[frequency]['callbacks'].append(callback_info)
-        print(f"🎮 Added callback for '{name}' to {frequency} Hz frequency group")
+        log_debug(self.logger, f"Added callback for '{name}' to {frequency} Hz frequency group")
     
     def _add_simulation_object_to_frequency_group(self, name: str, obj: SimulationObject):
         """Add simulation object to appropriate frequency group based on its update rate"""
@@ -1205,9 +1205,9 @@ class SimulationManager:
         self.frequency_groups[frequency]['objects'].append(object_info)
         self.frequency_groups[frequency]['object_updates'].append(object_update_info)
         
-        print(f"🌍 Added object '{name}' to {frequency} Hz frequency group "
+        log_debug(self.logger, f"Added object '{name}' to {frequency} Hz frequency group "
               f"({len(self.frequency_groups[frequency]['objects'])} objects in group)")
-        print(f"   ↳ Object internal updates will be grouped at {frequency} Hz")
+        log_debug(self.logger, f"Object internal updates will be grouped at {frequency} Hz")
     
     def _create_robot_update_wrapper(self, robot: Robot):
         """Create wrapper for robot internal updates"""
@@ -1255,18 +1255,18 @@ class SimulationManager:
     def _start_frequency_grouped_processes(self):
         """Start all frequency-grouped processes"""
         
-        print(f"🚀 Starting frequency-grouped processes...")
+        log_info(self.logger, "Starting frequency-grouped processes...")
         
         active_frequencies = sorted(self.frequency_groups.keys())
         total_robots = sum(len(group['robots']) for group in self.frequency_groups.values())
         
-        print(f"Process optimization:")
-        print(f"   Traditional approach: {total_robots} processes (1 per robot)")
-        print(f"   Frequency-grouped: {len(active_frequencies)} processes (1 per frequency)")
+        log_debug(self.logger, "Process optimization:")
+        log_debug(self.logger, f"Traditional approach: {total_robots} processes (1 per robot)")
+        log_debug(self.logger, f"Frequency-grouped: {len(active_frequencies)} processes (1 per frequency)")
         reduction_percent = self._calculate_process_reduction_percent()
-        print(f"   Process reduction: {reduction_percent:.1f}%")
+        log_debug(self.logger, f"Process reduction: {reduction_percent:.1f}%")
         
-        print(f"Frequency distribution:")
+        log_debug(self.logger, "Frequency distribution:")
         for frequency in active_frequencies:
             group = self.frequency_groups[frequency]
             robot_count = len(group['robots'])
@@ -1278,7 +1278,7 @@ class SimulationManager:
             total_items = robot_count + object_count + callback_count
             internal_updates = robot_update_count + object_update_count
             
-            print(f"   {frequency:6.1f} Hz: {robot_count:3d} robots, {object_count:2d} objects, "
+            log_debug(self.logger, f"{frequency:6.1f} Hz: {robot_count:3d} robots, {object_count:2d} objects, "
                   f"{callback_count:3d} callbacks, {internal_updates:3d} internal updates")
             
             # Start process for this frequency
@@ -1293,8 +1293,8 @@ class SimulationManager:
         group = self.frequency_groups[frequency]
         dt = 1.0 / frequency
         
-        print(f"🔄 Starting {frequency} Hz unified frequency group process")
-        print(f"   Processing: {len(group['callbacks'])} callbacks, "
+        log_debug(self.logger, f"Starting {frequency} Hz unified frequency group process")
+        log_debug(self.logger, f"Processing: {len(group['callbacks'])} callbacks, "
               f"{len(group['robot_updates'])} robot updates, "
               f"{len(group['object_updates'])} object updates")
         
@@ -1410,11 +1410,11 @@ class SimulationManager:
         try:
             stats = self.time_manager.get_timing_stats()
             
-            print(f"\n📊 Timing Performance Statistics:")
-            print(f"   Simulation time: {stats.sim_time:.2f}s")
-            print(f"   Real time elapsed: {stats.real_time_elapsed:.2f}s")
-            print(f"   Target factor: {stats.real_time_factor:.2f}x")
-            print(f"   Actual factor: {stats.actual_speed}")
+            log_info(self.logger, "Timing Performance Statistics:")
+            log_info(self.logger, f"Simulation time: {stats.sim_time:.2f}s")
+            log_info(self.logger, f"Real time elapsed: {stats.real_time_elapsed:.2f}s")
+            log_info(self.logger, f"Target factor: {stats.real_time_factor:.2f}x")
+            log_info(self.logger, f"Actual factor: {stats.actual_speed}")
             
             # Calculate error percentage
             if stats.real_time_elapsed > 0 and stats.sim_time > 0:
@@ -1422,17 +1422,17 @@ class SimulationManager:
                 error_percent = abs(actual_factor - stats.real_time_factor) / stats.real_time_factor * 100
                 
                 if error_percent < 5.0:
-                    status = "✅ EXCELLENT"
+                    status = "EXCELLENT"
                 elif error_percent < 10.0:
-                    status = "✅ GOOD" 
+                    status = "GOOD" 
                 elif error_percent < 20.0:
-                    status = "⚠️ FAIR"
+                    status = "FAIR"
                 else:
-                    status = "❌ POOR"
+                    status = "POOR"
                     
-                print(f"   Timing accuracy: {status} ({error_percent:.1f}% error)")
+                log_info(self.logger, f"Timing accuracy: {status} ({error_percent:.1f}% error)")
             else:
-                print(f"   Timing accuracy: N/A (insufficient data)")
+                log_info(self.logger, "Timing accuracy: N/A (insufficient data)")
                 
         except Exception as e:
             log_warning(self.logger, f"Could not get timing stats: {e}")
@@ -1441,7 +1441,7 @@ class SimulationManager:
         """Handle control commands from monitor window"""
         if command == 'toggle_play_pause':
             self._simulation_paused = not self._simulation_paused
-            print(f"🎮 Monitor control: {'Paused' if self._simulation_paused else 'Resumed'}")
+            log_info(self.logger, f"Monitor control: {'Paused' if self._simulation_paused else 'Resumed'}")
         elif command == 'reset':
             self._reset_requested = True
             log_info(self.logger, "Monitor control: Reset requested")

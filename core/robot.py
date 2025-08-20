@@ -18,10 +18,14 @@ from core.simulation_object import SimulationObject, ObjectParameters, ObjectTyp
 from core.urdf_loader import URDFLoader, URDFLink, URDFJoint
 import copy
 from core.time_manager import TimeManager, get_global_time_manager
+from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
 from scipy.spatial.transform import Rotation
 
 # Global robot template cache
 _ROBOT_TEMPLATE_CACHE = {}
+
+# Module logger
+logger = get_logger(__name__)
 
 
 class JointType(Enum):
@@ -319,14 +323,14 @@ class Robot(SimulationObject):
             # Cache the robot template for future instances
             self._cache_robot_template(cache_key)
             
-            print(f"✅ Robot '{self.robot_name}' loaded successfully")
-            print(f"   Links: {len(self.links)}, Joints: {len(self.joints)}")
-            print(f"   Base link: {self.base_link_name}")
+            log_debug(logger, f"Robot '{self.robot_name}' loaded successfully")
+            log_debug(logger, f"   Links: {len(self.links)}, Joints: {len(self.joints)}")
+            log_debug(logger, f"   Base link: {self.base_link_name}")
             
             return True
             
         except Exception as e:
-            print(f"❌ Failed to load robot from URDF: {e}")
+            log_error(logger, f"Failed to load robot from URDF: {e}")
             return False
     
     def _find_base_link(self) -> str:
@@ -365,11 +369,11 @@ class Robot(SimulationObject):
             self.joint_names = template['joint_names'].copy()
             self.base_link_name = template['base_link_name']
             
-            print(f"🚀 Robot '{self.robot_name}' loaded from template cache")
+            log_info(logger, f"Robot '{self.robot_name}' loaded from template cache")
             return True
             
         except Exception as e:
-            print(f"⚠️ Robot template cache load failed: {e}")
+            log_warning(logger, f"Robot template cache load failed: {e}")
             # Remove corrupted cache entry
             if cache_key in _ROBOT_TEMPLATE_CACHE:
                 del _ROBOT_TEMPLATE_CACHE[cache_key]
@@ -389,10 +393,10 @@ class Robot(SimulationObject):
                 'urdf_path': self.robot_parameters.urdf_path,
                 'cache_time': time.time()
             }
-            print(f"📋 Robot template cached: {self.robot_parameters.urdf_path}")
+            log_info(logger, f"Robot template cached: {self.robot_parameters.urdf_path}")
             
         except Exception as e:
-            print(f"⚠️ Robot template caching failed: {e}")
+            log_warning(logger, f"Robot template caching failed: {e}")
     
     @staticmethod
     def get_robot_template_cache_stats():
@@ -408,7 +412,7 @@ class Robot(SimulationObject):
         """Clear the robot template cache"""
         global _ROBOT_TEMPLATE_CACHE
         _ROBOT_TEMPLATE_CACHE.clear()
-        print("🧹 Robot template cache cleared")
+        log_info(logger, "Robot template cache cleared")
     
     def _start_robot_processes(self):
         """Start robot processes - unified or separate based on configuration"""
@@ -417,19 +421,19 @@ class Robot(SimulationObject):
             
             # Check if robot is managed by FrequencyGrouping
             if self.robot_parameters.frequency_grouping_managed:
-                print(f"🔄 Robot '{self.robot_name}': Process management delegated to FrequencyGrouping")
+                log_debug(logger, f"Robot '{self.robot_name}': Process management delegated to FrequencyGrouping")
                 return
             
             if self.robot_parameters.unified_process:
                 # Event-driven unified process (NEW)
                 self._unified_process = self.env.process(self._unified_event_driven_loop())
-                print(f"🤖 Robot '{self.robot_name}': Started unified event-driven process")
+                log_debug(logger, f"Robot '{self.robot_name}': Started unified event-driven process")
             else:
                 # Legacy: Independent processes
                 self._joint_control_process = self.env.process(self._joint_control_process_loop())
                 self._sensor_process = self.env.process(self._sensor_process_loop())
                 self._base_motion_process = self.env.process(self._base_motion_process_loop())
-                print(f"🤖 Robot '{self.robot_name}': Started independent SimPy processes")
+                log_debug(logger, f"Robot '{self.robot_name}': Started independent SimPy processes")
     
     def _joint_control_process_loop(self) -> Generator:
         """Independent SimPy process for high-frequency joint control"""
@@ -452,7 +456,7 @@ class Robot(SimulationObject):
                 self._update_forward_kinematics()
                 
             except Exception as e:
-                print(f"⚠️ Robot '{self.robot_name}' joint control error: {e}")
+                log_error(logger, f"Robot '{self.robot_name}' joint control error: {e}")
             
             # Yield control with joint control frequency
             yield self.env.timeout(joint_dt)
@@ -467,7 +471,7 @@ class Robot(SimulationObject):
                 self._process_sensors()
                 
             except Exception as e:
-                print(f"⚠️ Robot '{self.robot_name}' sensor processing error: {e}")
+                log_error(logger, f"Robot '{self.robot_name}' sensor processing error: {e}")
             
             # Yield control with sensor frequency
             yield self.env.timeout(sensor_dt)
@@ -483,7 +487,7 @@ class Robot(SimulationObject):
                     self._update_base_motion(base_dt)
                 
             except Exception as e:
-                print(f"⚠️ Robot '{self.robot_name}' base motion error: {e}")
+                log_error(logger, f"Robot '{self.robot_name}' base motion error: {e}")
             
             # Yield control with base motion frequency
             yield self.env.timeout(base_dt)
@@ -556,7 +560,7 @@ class Robot(SimulationObject):
                         distance = np.linalg.norm(self._navigation_target.position - current_pose.position)
                         
                         if distance < 0.1:  # Reached target
-                            print(f"🎯 Robot '{self.robot_name}': Reached navigation target")
+                            log_info(logger, f"Robot '{self.robot_name}': Reached navigation target")
                             with self._event_lock:
                                 self._has_navigation_target = False
                                 self._navigation_target = None
@@ -578,7 +582,7 @@ class Robot(SimulationObject):
                     last_sensor_update = current_time
                 
             except Exception as e:
-                print(f"⚠️ Robot '{self.robot_name}' unified process error: {e}")
+                log_error(logger, f"Robot '{self.robot_name}' unified process error: {e}")
             
             # Dynamic timeout based on activity
             if active_updates:
@@ -599,10 +603,10 @@ class Robot(SimulationObject):
             
         if not self.robot_parameters.unified_process and self._navigation_process is None:
             self._navigation_process = self.env.process(self._navigation_process_loop(target_pose))
-            print(f"🧭 Robot '{self.robot_name}': Navigation process started")
+            log_debug(logger, f"Robot '{self.robot_name}': Navigation process started")
             return True
         elif self.robot_parameters.unified_process:
-            print(f"🧭 Robot '{self.robot_name}': Navigation target set for unified process")
+            log_debug(logger, f"Robot '{self.robot_name}': Navigation target set for unified process")
             return True
         return False
     
@@ -616,9 +620,9 @@ class Robot(SimulationObject):
             try:
                 self._navigation_process.interrupt()
                 self._navigation_process = None
-                print(f"🛑 Robot '{self.robot_name}': Navigation process stopped")
+                log_debug(logger, f"Robot '{self.robot_name}': Navigation process stopped")
             except Exception as e:
-                print(f"⚠️ Error stopping navigation process: {e}")
+                log_error(logger, f"Error stopping navigation process: {e}")
     
     def _navigation_process_loop(self, target_pose: Optional[Pose] = None) -> Generator:
         """Independent SimPy process for autonomous navigation"""
@@ -631,7 +635,7 @@ class Robot(SimulationObject):
                 distance = np.linalg.norm(target_pose.position - current_pose.position)
                 
                 if distance < 0.1:  # Reached target
-                    print(f"🎯 Robot '{self.robot_name}': Reached navigation target")
+                    log_info(logger, f"Robot '{self.robot_name}': Reached navigation target")
                     break
                 
                 # Calculate velocity towards target
@@ -647,9 +651,9 @@ class Robot(SimulationObject):
                 yield self.env.timeout(nav_dt)
                 
         except simpy.Interrupt:
-            print(f"🛑 Robot '{self.robot_name}': Navigation interrupted")
+            log_debug(logger, f"Robot '{self.robot_name}': Navigation interrupted")
         except Exception as e:
-            print(f"⚠️ Robot '{self.robot_name}' navigation error: {e}")
+            log_error(logger, f"Robot '{self.robot_name}' navigation error: {e}")
         finally:
             # Stop when navigation ends
             self.stop()
@@ -885,7 +889,7 @@ class Robot(SimulationObject):
                 pass
         
         mode = "unified" if self.robot_parameters.unified_process else "independent"
-        print(f"🔻 Robot '{self.robot_name}': All {mode} processes shutdown")
+        log_debug(logger, f"Robot '{self.robot_name}': All {mode} processes shutdown")
     
     # ====================
     # State Query Interface (ROS 2 compatible)
@@ -956,19 +960,19 @@ class Robot(SimulationObject):
     def print_robot_info(self):
         """Print detailed robot information"""
         info = self.get_robot_info()
-        print(f"\n🤖 Robot Information: {info['name']}")
-        print(f"URDF: {info['urdf_path']}")
-        print(f"Base Link: {info['base_link']}")
-        print(f"Links ({info['num_links']}): {', '.join(info['link_names'])}")
-        print(f"Joints ({info['num_joints']}):")
+        log_info(logger, f"Robot Information: {info['name']}")
+        log_info(logger, f"URDF: {info['urdf_path']}")
+        log_info(logger, f"Base Link: {info['base_link']}")
+        log_info(logger, f"Links ({info['num_links']}): {', '.join(info['link_names'])}")
+        log_info(logger, f"Joints ({info['num_joints']}):")
         for joint_name in info['joint_names']:
             joint_type = info['joint_types'][joint_name]
             joint_limits = info['joint_limits'][joint_name]
-            print(f"  - {joint_name}: {joint_type}")
+            log_info(logger, f"  - {joint_name}: {joint_type}")
             if joint_type != 'fixed':
-                print(f"    Position: {joint_limits['position']}")
-                print(f"    Velocity: {joint_limits['velocity']}")
-                print(f"    Effort: {joint_limits['effort']}")
+                log_info(logger, f"    Position: {joint_limits['position']}")
+                log_info(logger, f"    Velocity: {joint_limits['velocity']}")
+                log_info(logger, f"    Effort: {joint_limits['effort']}")
     
     # ====================
     # Programmatic Robot Creation (7.1)
@@ -1019,11 +1023,11 @@ class Robot(SimulationObject):
             self.links[name] = Link(link_info)
             self.link_names = list(self.links.keys())
             
-            print(f"✅ Added link '{name}': {geometry_type}")
+            log_debug(logger, f"Added link '{name}': {geometry_type}")
             return True
             
         except Exception as e:
-            print(f"❌ Failed to add link '{name}': {e}")
+            log_error(logger, f"Failed to add link '{name}': {e}")
             return False
     
     def add_joint(self, name: str, joint_type: Union[JointType, str],
@@ -1051,11 +1055,11 @@ class Robot(SimulationObject):
             return False
             
         if parent_link not in self.links:
-            print(f"❌ Parent link '{parent_link}' not found")
+            log_error(logger, f"Parent link '{parent_link}' not found")
             return False
             
         if child_link not in self.links:
-            print(f"❌ Child link '{child_link}' not found")
+            log_error(logger, f"Child link '{child_link}' not found")
             return False
         
         try:
@@ -1102,11 +1106,11 @@ class Robot(SimulationObject):
             self.joints[name] = Joint(joint_info)
             self.joint_names = list(self.joints.keys())
             
-            print(f"✅ Added joint '{name}': {joint_type_str} ({parent_link} -> {child_link})")
+            log_debug(logger, f"Added joint '{name}': {joint_type_str} ({parent_link} -> {child_link})")
             return True
             
         except Exception as e:
-            print(f"❌ Failed to add joint '{name}': {e}")
+            log_error(logger, f"Failed to add joint '{name}': {e}")
             return False
     
     def finalize_robot(self) -> bool:
@@ -1129,25 +1133,25 @@ class Robot(SimulationObject):
             if len(base_candidates) == 1:
                 self.base_link_name = base_candidates[0]
             elif len(base_candidates) > 1:
-                print(f"⚠️ Multiple potential base links found: {base_candidates}. Using first: {base_candidates[0]}")
+                log_warning(logger, f"Multiple potential base links found: {base_candidates}. Using first: {base_candidates[0]}")
                 self.base_link_name = base_candidates[0]
             elif self.link_names:
-                print(f"⚠️ No base link found, using first link: {self.link_names[0]}")
+                log_warning(logger, f"No base link found, using first link: {self.link_names[0]}")
                 self.base_link_name = self.link_names[0]
             else:
-                print("❌ No links in robot")
+                log_error(logger, "No links in robot")
                 return False
             
             # Update forward kinematics
             self._update_forward_kinematics()
             
-            print(f"✅ Robot finalized: {len(self.links)} links, {len(self.joints)} joints")
-            print(f"   Base link: {self.base_link_name}")
+            log_debug(logger, f"Robot finalized: {len(self.links)} links, {len(self.joints)} joints")
+            log_debug(logger, f"   Base link: {self.base_link_name}")
             
             return True
             
         except Exception as e:
-            print(f"❌ Failed to finalize robot: {e}")
+            log_error(logger, f"Failed to finalize robot: {e}")
             return False
     
     def clear_robot(self):
@@ -1157,7 +1161,7 @@ class Robot(SimulationObject):
         self.link_names.clear()
         self.joint_names.clear()
         self.base_link_name = ""
-        print("🗑️ Robot cleared")
+        log_debug(logger, "Robot cleared")
     
     # ====================
     # Visualization Support
@@ -1287,7 +1291,7 @@ def create_robot_programmatically(env: simpy.Environment,
     robot._navigation_process = None
     robot._base_motion_process = None
     
-    print(f"✅ Created empty robot '{robot_name}' for programmatic construction")
-    print("   Use add_link(), add_joint(), finalize_robot() to build, then processes will start automatically")
+    log_debug(logger, f"Created empty robot '{robot_name}' for programmatic construction")
+    log_debug(logger, "   Use add_link(), add_joint(), finalize_robot() to build, then processes will start automatically")
     
     return robot

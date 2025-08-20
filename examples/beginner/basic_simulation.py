@@ -97,27 +97,8 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
             unified_process=True  # Use parameter from function call
         )
         
-        # Analyze robot joint configuration
-        print("🔍 Analyzing robot joints...")
-        joint_names = robot.get_joint_names()
-        print(f"📋 Total joints: {len(joint_names)}")
-        
-        movable_joints = []
-        for name in joint_names:
-            joint = robot.joints[name]
-            joint_type = joint.joint_type.value if hasattr(joint.joint_type, 'value') else str(joint.joint_type)
-            if joint_type in ['revolute', 'prismatic', 'continuous']:
-                movable_joints.append(name)
-                print(f"  ✅ {name}: {joint_type} (movable)")
-            else:
-                print(f"  ⚪ {name}: {joint_type} (fixed)")
-        
-        print(f"🎯 Found {len(movable_joints)} movable joints: {movable_joints}")
-        
-        if not movable_joints:
-            print("ℹ️  No movable joints found - robot will remain stationary")
-            print("    This is normal for simple demonstration robots")
-        
+        movable_joints = [name for name in robot.get_joint_names() if robot.joints[name].joint_type.value != 'fixed']
+                
         # Callback execution counter
         callback_count = 0
         
@@ -203,13 +184,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
             mobile_callback_count += 1
             
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
-            
-            # Optimized debug output - only when debugging enabled
-            if DEBUG_VERBOSE and (mobile_callback_count <= 10 or mobile_callback_count % 50 == 0):
-                log_debug(logger, f"Mobile Callback #{mobile_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
-                if mobile_callback_count <= 3:
-                    log_debug(logger, "Using cached velocity objects for performance")
-            
+                        
             # Use pre-cached velocity object instead of creating new one
             velocity = velocity_cache['circular']
             sim.set_robot_velocity("mobile_robot", velocity)
@@ -276,10 +251,6 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
             
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
             
-            # Optimized debug output
-            if DEBUG_VERBOSE and (robot1_callback_count <= 5 or robot1_callback_count % 25 == 0):
-                log_debug(logger, f"Robot1 Callback #{robot1_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
-            
             # Use cached joint names instead of querying every time
             for i, joint_name in enumerate(robot1_movable_joints):
                 position = 0.3 * math.sin(t * 2 + i)
@@ -291,12 +262,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
             robot2_callback_count += 1
             
             t = sim.get_sim_time()  # Use simulation time for real-time factor control
-            
-            # Optimized debug output
-            if DEBUG_VERBOSE and (robot2_callback_count <= 5 or robot2_callback_count % 25 == 0):
-                log_debug(logger, f"Robot2 Callback #{robot2_callback_count}: t={t:.2f}s, dt={dt:.4f}s")
-            
-            # Use cached joint names instead of querying every time
+                        
             for i, joint_name in enumerate(robot2_movable_joints):
                 position = 0.4 * math.cos(t * 1.5 + i * math.pi / 2)
                 sim.set_robot_joint_position("robot2", joint_name, position)
@@ -455,7 +421,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
             controller = create_optimized_controller(robot_name, robot_id)
             
             # Use higher frequency for performance testing
-            robot_frequency = 20.0  # Higher frequency for intensive testing
+            robot_frequency = 10.0  # Higher frequency for intensive testing
             
             # Set callback with performance optimization
             sim.set_robot_control_callback(robot_name, controller, frequency=robot_frequency)
@@ -488,7 +454,6 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         logger.info(f"   Wall clock time: {actual_elapsed_time:.2f}s")
         logger.info(f"   🚀 ACHIEVED SPEED FACTOR: {speed_factor_achieved:.2f}x")
         logger.info(f"   Target speed factor: {real_time_factor:.2f}x")
-        logger.info(f"   Speed efficiency: {(speed_factor_achieved/real_time_factor)*100:.1f}%")
         logger.info(f"")
         logger.info(f"📈 Callback Performance:")
         logger.info(f"   Total control callbacks: {total_callbacks:,}")
@@ -531,61 +496,13 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
                 for key, value in timing_stats.items():
                     logger.info(f"     {key}: {value}")
         
-        # Performance rating and recommendations
-        callbacks_per_robot_per_sec = total_callbacks / actual_elapsed_time / num_robots
-        if speed_factor_achieved > 20.0:
-            rating = "🚀 ULTRA-FAST (>20x)"
-            recommendation = "Exceptional performance! Try even higher targets."
-        elif speed_factor_achieved > 10.0:
-            rating = "⚡ EXCELLENT (>10x)"
-            recommendation = "Outstanding performance for 100-robot simulation."
-        elif speed_factor_achieved > 5.0:
-            rating = "✅ VERY GOOD (>5x)"
-            recommendation = "Strong performance, consider frequency grouping optimization."
-        elif speed_factor_achieved > 2.0:
-            rating = "✅ GOOD (>2x)"
-            recommendation = "Acceptable performance, monitor system resources."
-        elif speed_factor_achieved > 1.0:
-            rating = "⚠️ FAIR (>1x)"
-            recommendation = "Enable frequency grouping and reduce visualization."
-        else:
-            rating = "❌ POOR (<1x)"
-            recommendation = "Disable visualization, enable optimization, reduce robot count."
-        
-        logger.info(f"")
-        logger.info(f"🏁 FINAL ASSESSMENT: {rating}")
-        logger.info(f"💡 Recommendation: {recommendation}")
-        logger.info(f"   Per-robot callback efficiency: {callbacks_per_robot_per_sec:.2f} Hz")
         
         # Calculate optimization statistics
         process_reduction = 0
         num_processes = num_robots  # Default to traditional count
-        
-        if use_frequency_grouping and hasattr(sim, 'get_frequency_grouping_stats'):
-            freq_stats = sim.get_frequency_grouping_stats()
-            if freq_stats.get('enabled'):
-                process_reduction = freq_stats.get('process_reduction_percent', 0)
-                num_processes = freq_stats.get('total_groups', num_robots)
-        
-        # Return comprehensive performance data
-        return {
-            'num_robots': num_robots,
-            'frequency_grouped': use_frequency_grouping,
-            'num_processes': num_processes,
-            'target_duration': duration,
-            'simulation_time': sim_time,
-            'wall_time': actual_elapsed_time,
-            'speed_factor_achieved': speed_factor_achieved,
-            'target_speed_factor': real_time_factor,
-            'speed_efficiency_percent': (speed_factor_achieved/real_time_factor)*100,
-            'total_callbacks': total_callbacks,
-            'avg_callback_rate': total_callbacks/actual_elapsed_time,
-            'per_robot_callback_rate': callbacks_per_robot_per_sec,
-            'callback_efficiency_percent': (total_callbacks/(num_robots * 20.0 * duration))*100,
-            'process_reduction_percent': process_reduction,
-            'performance_rating': rating,
-            'recommendation': recommendation
-        }
+                
+        # Return 
+        return 
         
     except Exception as e:
         logger.error(f"❌ {num_robots}-robot maximum performance test failed: {e}")
@@ -607,52 +524,6 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
             pass
 
 
-def headless_example():
-    """Example 5: Headless simulation (no visualization)"""
-    print("\n🖥️ Headless Example")
-    print("=" * 40)
-    
-    from core.simulation_manager import SimulationConfig
-    
-    # Create headless configuration
-    config = SimulationConfig(
-        visualization=False,  # No visualization
-        update_rate=100.0     # High update rate
-    )
-    
-    sim = SimulationManager(config)
-    robot = sim.add_robot_from_urdf("headless_robot", "examples/robots/articulated_arm_robot.urdf")
-    
-    frame_count = 0
-    
-    # Performance optimization: Cache joint names for headless mode
-    headless_movable_joints = [name for name in robot.get_joint_names() 
-                              if robot.joints[name].joint_type.value != 'fixed']
-    
-    def headless_control(dt):
-        """High-frequency control for headless mode with optimizations"""
-        nonlocal frame_count
-        frame_count += 1
-        
-        # Optimized debug output
-        if DEBUG_MINIMAL and frame_count % 100 == 0:  # Print every second at 100Hz
-            log_debug(logger, f"Frame {frame_count}, dt={dt:.4f}s")
-        
-        # Simple joint motion with cached joint names
-        t = sim.get_sim_time()  # Use simulation time for real-time factor control
-        
-        for i, joint_name in enumerate(headless_movable_joints):
-            position = 0.2 * math.sin(t * 3 + i)
-            sim.set_robot_joint_position("headless_robot", joint_name, position)
-    
-    sim.set_robot_control_callback("headless_robot", headless_control, frequency=10.0)
-    sim.run(duration=5.0)
-    
-    # Print final statistics
-    info = sim.get_simulation_info()
-    print(f"📊 Final stats: {info['frame_count']} frames, {info['average_fps']:.1f} FPS")
-    print("✅ Headless example completed")
-
 
 def main():
     """Run all examples with automatic progression"""
@@ -666,8 +537,8 @@ def main():
                        help='Real-time speed multiplier (default: 1.0)')
     parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all',
                        help='Which example to run (default: all)')
-    parser.add_argument('--num-robots', type=int, default=100,
-                       help='Number of robots for performance demo (default: 100)')
+    parser.add_argument('--num-robots', type=int, default=10,
+                       help='Number of robots for performance demo (default: 10)')
     parser.add_argument('--frequency-grouping', action='store_true',
                        help='Enable frequency grouping optimization for performance demo')
     parser.add_argument('--duration', type=float, default=5.0,
@@ -682,10 +553,7 @@ def main():
     print(f"Visualization: {'ON (' + args.visualization_backend + ')' if args.visualization else 'OFF'}")
     print(f"Real-time factor: {args.real_time_factor}x")
     print("=" * 60)
-    
-    # Default to 100 robots for maximum performance testing
-    robot_count = 10  # Optimized for maximum speed verification
-    
+        
     # Use command line parameters
     default_visualization = args.visualization
     default_real_time_factor = args.real_time_factor
@@ -737,12 +605,8 @@ def main():
             
             func()
             
-            # Fast transition between examples
-            if name != "Headless Mode":
-                print(f"✅ {name} example completed.")
-                time.sleep(0.1)  # Minimal pause for log output
-            else:
-                time.sleep(0.05)  # Ultra-short pause for headless
+            print(f"✅ {name} example completed.")
+            time.sleep(0.1)  # Minimal pause for log output
                 
             # Force garbage collection between examples
             import gc
@@ -757,12 +621,6 @@ def main():
             traceback.print_exc()
     
     print("\n🎉 All examples completed!")
-    print("\nKey benefits of the new interface:")
-    print("  ✅ Automatic environment management") 
-    print("  ✅ Built-in visualization integration")
-    print("  ✅ Graceful shutdown handling")
-    print("  ✅ Multi-robot support")
-    print("  ✅ Headless mode support")
     
     # Final cleanup to ensure no hanging processes
     print("\n🧹 Performing final cleanup...")
