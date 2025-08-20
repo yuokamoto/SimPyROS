@@ -20,8 +20,18 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
     """Run monitor in separate process"""
     try:
         import tkinter as tk
+        import signal
         
         print(f"🚀 Starting process-separated monitor (PID: {os.getpid()})")
+        
+        # Install signal handlers for proper Ctrl-C handling in child process
+        def signal_handler(signum, frame):
+            print(f"📡 Monitor process received signal {signum}")
+            raise KeyboardInterrupt(f"Signal {signum} received")
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        print("✅ Signal handlers installed in monitor process")
         
         # Create window
         root = tk.Tk()
@@ -120,8 +130,16 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         try:
             root.mainloop()
         except KeyboardInterrupt:
-            print("⌨️ Monitor interrupted")
+            print("⌨️ Monitor interrupted by signal")
+        except Exception as e:
+            print(f"❌ Monitor process error: {e}")
         finally:
+            # Ensure clean shutdown
+            try:
+                root.quit()
+                root.destroy()
+            except:
+                pass
             print("🛑 Process-separated monitor exiting")
             
     except Exception as e:

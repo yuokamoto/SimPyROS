@@ -49,6 +49,15 @@ class MultiprocessingCleaner:
         """シグナルハンドラー"""
         log_info(logger, f"Received signal {signum}, cleaning up multiprocessing resources")
         self.cleanup_all()
+        # Exit after cleanup
+        if signum == signal.SIGINT:
+            log_info(logger, "Exiting due to SIGINT")
+            import sys
+            sys.exit(0)
+        elif signum == signal.SIGTERM:
+            log_info(logger, "Exiting due to SIGTERM")
+            import sys
+            sys.exit(0)
         
     def cleanup_all(self):
         """全てのマルチプロセシングリソースをクリーンアップ"""
@@ -74,9 +83,18 @@ class MultiprocessingCleaner:
             if process and process.is_alive():
                 log_info(logger, f"Terminating process PID: {process.pid}")
                 
+                # Send SIGINT first to allow graceful shutdown in child processes
+                try:
+                    import os
+                    os.kill(process.pid, signal.SIGINT)
+                    process.join(timeout=1.0)  # Wait for graceful shutdown
+                except (OSError, ProcessLookupError):
+                    pass  # Process might have already exited
+                
                 # Fast graceful termination
-                process.terminate()
-                process.join(timeout=0.5)  # Reduced from 2.0s to 0.5s
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=0.5)  # Reduced from 2.0s to 0.5s
                 
                 # Force kill if still alive
                 if process.is_alive():

@@ -253,6 +253,18 @@ class PyVistaVisualizationProcess:
         """Main visualization process loop"""
         print(f"🚀 PyVista process starting (PID: {os.getpid()})")
         
+        # Install signal handlers for proper Ctrl-C handling in child process
+        import signal
+        
+        def signal_handler(signum, frame):
+            print(f"📡 PyVista process received signal {signum}")
+            self._update_active = False
+            raise KeyboardInterrupt(f"Signal {signum} received")
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        print("✅ Signal handlers installed in PyVista process")
+        
         try:
             # Import PyVista in the visualization process
             print("🔄 Importing PyVista...")
@@ -310,6 +322,8 @@ class PyVistaVisualizationProcess:
             print(f"❌ PyVista not available in visualization process: {e}")
             import traceback
             traceback.print_exc()
+        except KeyboardInterrupt:
+            print(f"⌨️ PyVista process terminated by signal (PID: {os.getpid()})")
         except Exception as e:
             print(f"❌ PyVista可視化プロセスエラー: {e}")
             import traceback
@@ -317,6 +331,13 @@ class PyVistaVisualizationProcess:
         finally:
             # Stop updates if they're still running
             self._update_active = False
+            # Close plotter if it exists
+            if hasattr(self, 'plotter') and self.plotter:
+                try:
+                    self.plotter.close()
+                    print("✅ Plotter closed")
+                except:
+                    pass
             print(f"🛑 PyVista可視化プロセス終了 (PID: {os.getpid()})")
             
     def _setup_scene(self):
@@ -442,10 +463,14 @@ class PyVistaVisualizationProcess:
                         time.sleep(1.0 / 60.0)  # 60 FPS
                         
                     except KeyboardInterrupt:
+                        print("⌨️ Update thread interrupted")
+                        self._update_active = False
                         break
                     except Exception as e:
                         print(f"⚠️ Visualization loop error: {e}")
                         time.sleep(0.1)
+                        
+                print("🛑 Update loop exiting")
             
             # Start update thread
             update_thread = threading.Thread(target=update_loop, daemon=True)
@@ -457,15 +482,16 @@ class PyVistaVisualizationProcess:
                 while self._update_active:
                     time.sleep(0.1)
             except KeyboardInterrupt:
-                print("⌨️ Process interrupted")
-            
-            # Stop updates
-            self._update_active = False
+                print("⌨️ PyVista process interrupted by signal")
+            finally:
+                # Stop updates
+                self._update_active = False
                 
         else:
             # Headless mode - simple loop
             print("💻 Headless visualization loop")
-            while True:
+            self._update_active = True
+            while self._update_active:
                 try:
                     # Check for new robot geometry
                     self._process_geometry_queue()
@@ -481,6 +507,7 @@ class PyVistaVisualizationProcess:
                     time.sleep(1.0 / self.config.update_frequency)
                     
                 except KeyboardInterrupt:
+                    print("⌨️ Headless loop interrupted")
                     break
                 except Exception as e:
                     print(f"⚠️ Visualization loop error: {e}")
