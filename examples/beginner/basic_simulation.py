@@ -146,10 +146,9 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
     finally:
         try:
             sim.shutdown()
-            # Ensure monitor is fully stopped before continuing
+            # Fast monitor cleanup without excessive waiting
             if hasattr(sim, 'monitor') and sim.monitor:
-                print("⏳ Ensuring monitor cleanup...")
-                time.sleep(0.5)  # Give monitor time to fully close
+                logger.debug("Monitor cleanup initiated")
         except:
             pass
 
@@ -223,10 +222,9 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
     finally:
         try:
             sim.shutdown()
-            # Ensure monitor is fully stopped before continuing
+            # Fast monitor cleanup without excessive waiting
             if hasattr(sim, 'monitor') and sim.monitor:
-                print("⏳ Ensuring monitor cleanup...")
-                time.sleep(0.5)  # Give monitor time to fully close
+                logger.debug("Monitor cleanup initiated")
         except:
             pass
 
@@ -313,10 +311,9 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
     finally:
         try:
             sim.shutdown()
-            # Ensure monitor is fully stopped before continuing
+            # Fast monitor cleanup without excessive waiting
             if hasattr(sim, 'monitor') and sim.monitor:
-                print("⏳ Ensuring monitor cleanup...")
-                time.sleep(0.5)  # Give monitor time to fully close
+                logger.debug("Monitor cleanup initiated")
         except:
             pass
 
@@ -603,10 +600,9 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
     finally:
         try:
             sim.shutdown()
-            # Ensure monitor is fully stopped before continuing
+            # Fast monitor cleanup without excessive waiting
             if hasattr(sim, 'monitor') and sim.monitor:
-                print("⏳ Ensuring monitor cleanup...")
-                time.sleep(0.5)  # Give monitor time to fully close
+                logger.debug("Monitor cleanup initiated")
         except:
             pass
 
@@ -688,7 +684,7 @@ def main():
     print("=" * 60)
     
     # Default to 100 robots for maximum performance testing
-    robot_count = 100  # Optimized for maximum speed verification
+    robot_count = 10  # Optimized for maximum speed verification
     
     # Use command line parameters
     default_visualization = args.visualization
@@ -741,13 +737,12 @@ def main():
             
             func()
             
-            # Brief pause between examples with enhanced cleanup
+            # Fast transition between examples
             if name != "Headless Mode":
-                print(f"✅ {name} example completed. Next example starting soon...")
-                # Additional cleanup time for monitor windows
-                time.sleep(2.5)
+                print(f"✅ {name} example completed.")
+                time.sleep(0.1)  # Minimal pause for log output
             else:
-                time.sleep(0.5)  # Short pause for headless
+                time.sleep(0.05)  # Ultra-short pause for headless
                 
             # Force garbage collection between examples
             import gc

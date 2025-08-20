@@ -28,6 +28,8 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from core.simulation_object import Pose
 from scipy.spatial.transform import Rotation
+import copy
+import time
 
 # Try to import yourdfpy
 URDF_LIBRARY = None
@@ -47,6 +49,9 @@ try:
     TRIMESH_AVAILABLE = True
 except ImportError:
     TRIMESH_AVAILABLE = False
+
+# Global URDF template cache
+_URDF_TEMPLATE_CACHE = {}
 
 
 @dataclass
@@ -76,9 +81,9 @@ class URDFJoint:
 
 
 class URDFLoader:
-    """Unified URDF loader with mesh loading and optimization support"""
+    """Unified URDF loader with mesh loading, optimization, and template caching support"""
     
-    def __init__(self, package_path: Optional[str] = None, enable_mesh_optimization: bool = True):
+    def __init__(self, package_path: Optional[str] = None, enable_mesh_optimization: bool = True, use_template_cache: bool = True):
         self.package_path = package_path
         self.urdf_object = None
         self.links: Dict[str, URDFLink] = {}
@@ -93,6 +98,9 @@ class URDFLoader:
         # Path resolution context
         self._urdf_dir = None
         
+        # Template caching settings
+        self.use_template_cache = use_template_cache
+        
     def is_available(self) -> bool:
         """Check if URDF loading is available"""
         return URDF_LIBRARY is not None
@@ -102,7 +110,7 @@ class URDFLoader:
         return URDF_LIBRARY or "none"
         
     def load_urdf(self, urdf_path: str) -> bool:
-        """Load URDF file with enhanced mesh support"""
+        """Load URDF file with enhanced mesh support and template caching"""
         if not self.is_available():
             print("❌ No URDF parsing library available")
             return False
@@ -114,9 +122,21 @@ class URDFLoader:
         # Store URDF directory for relative path resolution
         self._urdf_dir = os.path.dirname(os.path.abspath(urdf_path))
         
+        # Create cache key from absolute path and modification time
+        abs_urdf_path = os.path.abspath(urdf_path)
+        cache_key = self._get_cache_key(abs_urdf_path)
+        
+        # Try to load from template cache first
+        if self.use_template_cache and cache_key in _URDF_TEMPLATE_CACHE:
+            return self._load_from_template_cache(cache_key)
+        
         try:
             if URDF_LIBRARY == "yourdfpy":
-                return self._load_with_yourdfpy(urdf_path)
+                success = self._load_with_yourdfpy(urdf_path)
+                # Cache the successfully loaded template
+                if success and self.use_template_cache:
+                    self._cache_template(cache_key, abs_urdf_path)
+                return success
             else:
                 print(f"❌ Unsupported URDF library: {URDF_LIBRARY}")
                 return False
@@ -139,6 +159,64 @@ class URDFLoader:
         except Exception as e:
             print(f"❌ yourdfpy loading failed: {e}")
             return False
+    
+    def _get_cache_key(self, urdf_path: str) -> str:
+        """Generate cache key from URDF path and modification time"""
+        try:
+            mtime = os.path.getmtime(urdf_path)
+            return f"{urdf_path}:{mtime}"
+        except OSError:
+            return f"{urdf_path}:0"
+    
+    def _load_from_template_cache(self, cache_key: str) -> bool:
+        """Load URDF data from template cache"""
+        try:
+            cached_data = _URDF_TEMPLATE_CACHE[cache_key]
+            self.urdf_object = cached_data['urdf_object']
+            self.robot_name = cached_data['robot_name'] 
+            self.links = copy.deepcopy(cached_data['links'])
+            self.joints = copy.deepcopy(cached_data['joints'])
+            self._urdf_dir = cached_data['urdf_dir']
+            print(f"🚀 Loaded from template cache: {cached_data['urdf_path']}")
+            return True
+        except Exception as e:
+            print(f"⚠️ Template cache load failed: {e}")
+            # Remove corrupted cache entry
+            if cache_key in _URDF_TEMPLATE_CACHE:
+                del _URDF_TEMPLATE_CACHE[cache_key]
+            return False
+    
+    def _cache_template(self, cache_key: str, urdf_path: str):
+        """Cache the successfully loaded URDF template"""
+        try:
+            _URDF_TEMPLATE_CACHE[cache_key] = {
+                'urdf_object': self.urdf_object,
+                'robot_name': self.robot_name,
+                'links': copy.deepcopy(self.links),
+                'joints': copy.deepcopy(self.joints), 
+                'urdf_dir': self._urdf_dir,
+                'urdf_path': urdf_path,
+                'cache_time': time.time()
+            }
+            print(f"📋 Cached URDF template: {urdf_path}")
+        except Exception as e:
+            print(f"⚠️ Template caching failed: {e}")
+    
+    @staticmethod
+    def get_cache_stats() -> Dict[str, Any]:
+        """Get template cache statistics"""
+        return {
+            'total_templates': len(_URDF_TEMPLATE_CACHE),
+            'cached_files': [data['urdf_path'] for data in _URDF_TEMPLATE_CACHE.values()],
+            'cache_size_mb': sys.getsizeof(_URDF_TEMPLATE_CACHE) / (1024 * 1024)
+        }
+    
+    @staticmethod
+    def clear_template_cache():
+        """Clear the entire template cache"""
+        global _URDF_TEMPLATE_CACHE
+        _URDF_TEMPLATE_CACHE.clear()
+        print("🧹 URDF template cache cleared")
     
     def _extract_links_joints_yourdfpy(self):
         """Extract links and joints from yourdfpy URDF object"""

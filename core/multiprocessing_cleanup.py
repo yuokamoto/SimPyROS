@@ -74,15 +74,15 @@ class MultiprocessingCleaner:
             if process and process.is_alive():
                 log_info(logger, f"Terminating process PID: {process.pid}")
                 
-                # Graceful termination
+                # Fast graceful termination
                 process.terminate()
-                process.join(timeout=2.0)
+                process.join(timeout=0.5)  # Reduced from 2.0s to 0.5s
                 
                 # Force kill if still alive
                 if process.is_alive():
                     log_warning(logger, f"Force killing process PID: {process.pid}")
                     process.kill()
-                    process.join(timeout=1.0)
+                    process.join(timeout=0.2)  # Reduced from 1.0s to 0.2s
                     
                 if process.is_alive():
                     log_warning(logger, f"Process PID: {process.pid} still alive after cleanup")
