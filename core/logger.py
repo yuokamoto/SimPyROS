@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SimPyROS 中央集権ログ設定
+SimPyROS Centralized Logging Configuration
 
-全モジュールで一貫したログ機能を提供し、設定可能なレベルと
-フォーマットでより良いデバッグと本番利用をサポートします。
+Provides consistent logging functionality across all modules with configurable
+levels and formats for better debugging and production use.
 """
 
 import logging
@@ -11,49 +11,110 @@ import os
 import sys
 from typing import Optional
 
-# デフォルトログ設定
+# Default logging configuration
 DEFAULT_LOG_LEVEL = os.getenv('SIMPYROS_LOG_LEVEL', 'INFO').upper()
 DEFAULT_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 SIMPLE_FORMAT = '%(levelname)s: %(message)s'
 
-# 重複ログ防止用のログキャッシュ
+# Logger cache to prevent duplicates
 _loggers = {}
+
+# Component-specific logging configuration
+COMPONENT_LOG_CONFIG = {
+    'visualization': {'file': 'logs/visualization.log', 'console': True},
+    'simulation': {'file': 'logs/simulation.log', 'console': True},
+    'robot': {'file': 'logs/robot.log', 'console': True},
+    'monitor': {'file': 'logs/monitor.log', 'console': False},
+    'performance': {'file': 'logs/performance.log', 'console': False},
+    'multiprocessing': {'file': 'logs/multiprocessing.log', 'console': False},
+    'examples': {'file': None, 'console': True}  # Examples only to console
+}
+
+
+def _ensure_log_directory():
+    """Ensure logs directory exists"""
+    log_dir = 'logs'
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
+
+def _get_component_from_name(name: str) -> str:
+    """Extract component type from logger name"""
+    if 'pyvista' in name or 'visualizer' in name or 'meshcat' in name:
+        return 'visualization'
+    elif 'simulation_manager' in name or 'simulation_object' in name:
+        return 'simulation'
+    elif 'robot' in name:
+        return 'robot'
+    elif 'monitor' in name:
+        return 'monitor'
+    elif 'performance' in name or 'benchmark' in name:
+        return 'performance'
+    elif 'multiprocessing' in name or 'cleanup' in name:
+        return 'multiprocessing'
+    elif 'examples' in name:
+        return 'examples'
+    else:
+        return 'simulation'  # Default fallback
 
 
 def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     """
-    一貫したフォーマットでログを取得または作成
+    Get or create logger with consistent formatting
     
     Args:
-        name: ログ名（通常は __name__）
-        level: オプションのログレベル上書き
+        name: Logger name (usually __name__)
+        level: Optional log level override
         
     Returns:
-        設定されたログインスタンス
+        Configured logger instance
     """
     if name in _loggers:
         return _loggers[name]
     
     logger = logging.getLogger(name)
     
-    # レベル設定
+    # Level configuration
     log_level = getattr(logging, (level or DEFAULT_LOG_LEVEL).upper(), logging.INFO)
     logger.setLevel(log_level)
     
-    # ハンドラが存在しない場合のみ追加（重複ハンドラ回避）
+    # Add handlers only if none exists (avoid duplicate handlers)
     if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
+        _ensure_log_directory()
         
-        # ユーザー向けメッセージにはシンプルフォーマットを使用
-        if name.startswith('simpyros'):
-            formatter = logging.Formatter(SIMPLE_FORMAT)
-        else:
-            formatter = logging.Formatter(DEFAULT_FORMAT)
+        # Get component configuration
+        component = _get_component_from_name(name)
+        config = COMPONENT_LOG_CONFIG.get(component, COMPONENT_LOG_CONFIG['simulation'])
+        
+        # Console handler (if enabled for this component)
+        if config['console']:
+            console_handler = logging.StreamHandler(sys.stdout)
             
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+            # Use simple format for user-facing messages
+            if name.startswith('simpyros'):
+                formatter = logging.Formatter(SIMPLE_FORMAT)
+            else:
+                formatter = logging.Formatter(DEFAULT_FORMAT)
+                
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+        
+        # File handler (if specified for this component)
+        if config['file']:
+            try:
+                file_handler = logging.FileHandler(config['file'], mode='a')
+                file_formatter = logging.Formatter(DEFAULT_FORMAT)
+                file_handler.setFormatter(file_formatter)
+                logger.addHandler(file_handler)
+            except Exception as e:
+                # Fallback to console if file logging fails
+                if not config['console']:
+                    console_handler = logging.StreamHandler(sys.stdout)
+                    console_handler.setFormatter(logging.Formatter(SIMPLE_FORMAT))
+                    logger.addHandler(console_handler)
+                print(f"Warning: Failed to create file handler for {config['file']}: {e}")
     
-    # ルートログへの伝播を防止
+    # Prevent propagation to root logger
     logger.propagate = False
     
     _loggers[name] = logger
@@ -62,10 +123,10 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
 
 def set_log_level(level: str):
     """
-    全SimPyROSログのログレベルを設定
+    Set log level for all SimPyROS logs
     
     Args:
-        level: ログレベル ('DEBUG', 'INFO', 'WARNING', 'ERROR')
+        level: Log level ('DEBUG', 'INFO', 'WARNING', 'ERROR')
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
     
@@ -76,40 +137,40 @@ def set_log_level(level: str):
 
 
 def enable_debug():
-    """全SimPyROSコンポーネントのデバッグログを有効化"""
+    """Enable debug logging for all SimPyROS components"""
     set_log_level('DEBUG')
 
 
 def suppress_verbose():
-    """詳細出力を抑制（WARNINGレベル以上のみ）"""
+    """Suppress verbose output (WARNING level and above only)"""
     set_log_level('WARNING')
 
 
-# 一般的なログパターン用の便利関数
+# Convenience functions for common logging patterns
 def log_success(logger: logging.Logger, message: str):
-    """一貫したフォーマットで成功メッセージをログ出力"""
+    """Log success message with consistent format"""
     logger.info(f"✅ {message}")
 
 
 def log_warning(logger: logging.Logger, message: str):
-    """一貫したフォーマットで警告メッセージをログ出力"""
+    """Log warning message with consistent format"""
     logger.warning(f"⚠️ {message}")
 
 
 def log_error(logger: logging.Logger, message: str):
-    """一貫したフォーマットでエラーメッセージをログ出力"""
+    """Log error message with consistent format"""
     logger.error(f"❌ {message}")
 
 
 def log_debug(logger: logging.Logger, message: str):
-    """一貫したフォーマットでデバッグメッセージをログ出力"""
+    """Log debug message with consistent format"""
     logger.debug(f"🔧 {message}")
 
 
 def log_info(logger: logging.Logger, message: str):
-    """一貫したフォーマットで情報メッセージをログ出力"""
+    """Log info message with consistent format"""
     logger.info(f"ℹ️ {message}")
 
 
-# モジュール用デフォルトログの初期化
+# Initialize default logger for module
 logger = get_logger(__name__)

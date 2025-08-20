@@ -306,6 +306,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
     
     from core.simulation_manager import SimulationManager, SimulationConfig
     import time
+    import random
     
     # Create optimized configuration for maximum performance
     config = SimulationConfig(
@@ -314,7 +315,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         update_rate=100.0,    # Maximum update rate for performance testing
         real_time_factor=real_time_factor,
         enable_frequency_grouping=use_frequency_grouping,  # Enabled by default for optimization
-        enable_monitor=False  # Disable monitor for maximum performance
+        enable_monitor=True  # Enable monitor for performance demo visibility
     )
     
     # Single SimulationManager handles everything automatically
@@ -328,6 +329,13 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         # Calculate compact grid dimensions for 100+ robots
         grid_size = int(math.ceil(math.sqrt(num_robots)))
         
+        # Available robot types for random selection
+        robot_types = [
+            ("mobile", "examples/robots/mobile_robot.urdf"),
+            ("arm", "examples/robots/articulated_arm_robot.urdf"),
+            ("collision", "examples/robots/collision_robot.urdf")
+        ]
+        
         # Create robots optimized for maximum performance
         for i in range(num_robots):
             x = (i % grid_size) * 1.5  # Compact spacing for performance
@@ -335,8 +343,8 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
             
             robot_name = f"robot_{i:03d}"
             
-            # Use lightweight mobile robot for fastest simulation
-            urdf_path = "examples/robots/mobile_robot.urdf"
+            # Randomly select robot type for variety
+            robot_type, urdf_path = random.choice(robot_types)
             
             # Create robot with optimized settings
             robot = sim.add_robot_from_urdf(
@@ -345,7 +353,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
                 initial_pose=Pose(x=x, y=y, z=0),
                 unified_process=True  # Use unified process for maximum performance
             )
-            robots.append((robot_name, robot, i))
+            robots.append((robot_name, robot, i, robot_type))
             
             # Progress feedback for large robot counts
             if num_robots >= 50 and (i + 1) % max(10, num_robots//10) == 0:
@@ -361,20 +369,27 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         total_callbacks = 0
         start_time = time.time()
         
-        def create_optimized_controller(robot_name, robot_id):
-            """Create high-performance controller optimized for 100+ robots"""
+        def create_optimized_controller(robot_name, robot_id, robot_type, robot_instance):
+            """Create high-performance controller optimized for 100+ robots with random movement patterns"""
             
-            # Pre-cache velocity objects for maximum performance
+            # Pre-cache velocity objects for maximum performance (for mobile robots)
             velocity_cache = {
-                'forward_fast': Velocity(linear_x=1.0, angular_z=0),
-                'circular_left': Velocity(linear_x=0.8, angular_z=0.6),
-                'circular_right': Velocity(linear_x=0.8, angular_z=-0.6),
-                'turn_left': Velocity(linear_x=0.3, angular_z=0.8),
-                'turn_right': Velocity(linear_x=0.3, angular_z=-0.8),
-                'zigzag_left': Velocity(linear_x=0.6, angular_z=0.4),
-                'zigzag_right': Velocity(linear_x=0.6, angular_z=-0.4),
+                'forward_slow': Velocity(linear_x=0.3, angular_z=0),
+                'forward_medium': Velocity(linear_x=0.5, angular_z=0),
+                'circular_left': Velocity(linear_x=0.4, angular_z=0.3),
+                'circular_right': Velocity(linear_x=0.4, angular_z=-0.3),
+                'turn_left': Velocity(linear_x=0.2, angular_z=0.4),
+                'turn_right': Velocity(linear_x=0.2, angular_z=-0.4),
+                'zigzag_left': Velocity(linear_x=0.3, angular_z=0.2),
+                'zigzag_right': Velocity(linear_x=0.3, angular_z=-0.2),
                 'stop': Velocity(linear_x=0, angular_z=0)
             }
+            
+            # Get movable joints for arm robots
+            movable_joints = []
+            if robot_type in ["arm", "collision"]:
+                movable_joints = [name for name in robot_instance.get_joint_names() 
+                                if robot_instance.joints[name].joint_type.value != 'fixed']
             
             def controller(dt):
                 nonlocal total_callbacks
@@ -384,31 +399,42 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
                 
                 # Minimal debug output for performance (only first few robots)
                 if robot_id < 2 and total_callbacks <= 3:
-                    logger.debug(f"🤖 Robot{robot_id:03d} Callback #{total_callbacks}: t={t:.2f}s")
+                    logger.debug(f"🤖 Robot{robot_id:03d} ({robot_type}) Callback #{total_callbacks}: t={t:.2f}s")
                 
-                # Ultra-fast pattern selection using bitwise operations for maximum performance
-                time_factor = int(t * 3.0)  # Faster pattern changes
-                pattern = (robot_id * 3 + time_factor) & 7  # 8 different patterns
+                # Random pattern selection with constrained movement to keep robots in view
+                time_factor = int(t * 2.0)  # Slower pattern changes for better visibility
+                pattern = (robot_id * 3 + time_factor) % 8  # 8 different patterns
                 
-                # Select movement pattern for maximum variety and performance
-                if pattern == 0:
-                    velocity = velocity_cache['forward_fast']
-                elif pattern == 1:
-                    velocity = velocity_cache['circular_left']
-                elif pattern == 2:
-                    velocity = velocity_cache['circular_right']
-                elif pattern == 3:
-                    velocity = velocity_cache['turn_left']
-                elif pattern == 4:
-                    velocity = velocity_cache['turn_right']
-                elif pattern == 5:
-                    velocity = velocity_cache['zigzag_left']
-                elif pattern == 6:
-                    velocity = velocity_cache['zigzag_right']
-                else:  # pattern == 7
-                    velocity = velocity_cache['forward_fast']  # Keep moving for performance test
-                
-                sim.set_robot_velocity(robot_name, velocity)
+                if robot_type == "mobile":
+                    # Mobile robot movement patterns with reduced speed to stay in camera view
+                    if pattern == 0:
+                        velocity = velocity_cache['forward_slow']
+                    elif pattern == 1:
+                        velocity = velocity_cache['circular_left']
+                    elif pattern == 2:
+                        velocity = velocity_cache['circular_right']
+                    elif pattern == 3:
+                        velocity = velocity_cache['turn_left']
+                    elif pattern == 4:
+                        velocity = velocity_cache['turn_right']
+                    elif pattern == 5:
+                        velocity = velocity_cache['zigzag_left']
+                    elif pattern == 6:
+                        velocity = velocity_cache['zigzag_right']
+                    else:  # pattern == 7
+                        velocity = velocity_cache['forward_medium']
+                    
+                    sim.set_robot_velocity(robot_name, velocity)
+                    
+                elif robot_type in ["arm", "collision"]:
+                    # Robot arm joint movement patterns
+                    for i, joint_name in enumerate(movable_joints):
+                        amplitude = 0.3 + (pattern % 3) * 0.2  # Varying amplitude: 0.3-0.7
+                        frequency = 0.3 + (pattern % 4) * 0.1  # Varying frequency: 0.3-0.6
+                        phase = i * math.pi / 4 + (pattern % 8) * math.pi / 8  # Varying phase
+                        position = amplitude * math.sin(t * frequency + phase)
+                        
+                        sim.set_robot_joint_position(robot_name, joint_name, position)
             
             return controller
         
@@ -416,9 +442,9 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         logger.info("🎮 Setting up high-performance controllers...")
         setup_start_time = time.time()
         
-        for robot_name, robot_instance, robot_id in robots:
+        for robot_name, robot_instance, robot_id, robot_type in robots:
             # Create optimized controller for maximum performance
-            controller = create_optimized_controller(robot_name, robot_id)
+            controller = create_optimized_controller(robot_name, robot_id, robot_type, robot_instance)
             
             # Use higher frequency for performance testing
             robot_frequency = 10.0  # Higher frequency for intensive testing

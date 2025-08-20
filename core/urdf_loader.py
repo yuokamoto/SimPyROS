@@ -47,6 +47,46 @@ except ImportError:
     _module_logger = get_logger(__name__)
     log_error(_module_logger, "yourdfpy not available. Install with: pip install yourdfpy")
 
+# URDF Loading Cache for Performance Optimization
+URDF_CACHE = {}  # urdf_path -> (parsed_urdf, timestamp)
+CACHE_TTL = 300  # Cache Time-To-Live in seconds (5 minutes)
+
+def _is_cache_valid(urdf_path: str) -> bool:
+    """Check if cached URDF is still valid"""
+    if urdf_path not in URDF_CACHE:
+        return False
+    
+    cached_data, cache_time = URDF_CACHE[urdf_path]
+    current_time = time.time()
+    
+    # Check if cache has expired
+    if current_time - cache_time > CACHE_TTL:
+        del URDF_CACHE[urdf_path]
+        return False
+    
+    # Check if file has been modified
+    try:
+        file_mtime = os.path.getmtime(urdf_path)
+        if file_mtime > cache_time:
+            del URDF_CACHE[urdf_path]
+            return False
+    except OSError:
+        # File doesn't exist anymore
+        del URDF_CACHE[urdf_path]
+        return False
+    
+    return True
+
+def _get_cached_urdf(urdf_path: str):
+    """Get cached URDF if valid"""
+    if _is_cache_valid(urdf_path):
+        return URDF_CACHE[urdf_path][0]
+    return None
+
+def _cache_urdf(urdf_path: str, parsed_urdf):
+    """Cache parsed URDF"""
+    URDF_CACHE[urdf_path] = (parsed_urdf, time.time())
+
 # Try trimesh for mesh handling
 try:
     import trimesh
@@ -153,10 +193,19 @@ class URDFLoader:
             return False
     
     def _load_with_yourdfpy(self, urdf_path: str) -> bool:
-        """Load URDF using yourdfpy"""
+        """Load URDF using yourdfpy with caching"""
         try:
-            log_info(self.logger, f"Loading URDF with yourdfpy: {urdf_path}")
-            self.urdf_object = urdf_lib.URDF.load(urdf_path)
+            # Try to get from cache first
+            cached_urdf = _get_cached_urdf(urdf_path)
+            if cached_urdf is not None:
+                log_debug(self.logger, f"Using cached URDF: {urdf_path}")
+                self.urdf_object = cached_urdf
+            else:
+                log_info(self.logger, f"Loading URDF with yourdfpy: {urdf_path}")
+                self.urdf_object = urdf_lib.URDF.load(urdf_path)
+                # Cache the parsed URDF
+                _cache_urdf(urdf_path, self.urdf_object)
+                
             self.robot_name = getattr(self.urdf_object, 'name', 'unknown_robot')
             
             self._extract_links_joints_yourdfpy()

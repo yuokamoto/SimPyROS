@@ -18,7 +18,7 @@ logger = get_logger('simpyros.multiprocessing_cleanup')
 
 class MultiprocessingCleaner:
     """
-    マルチプロセシングリソースの適切なクリーンアップを管理するクラス
+    Class to manage proper cleanup of multiprocessing resources
     """
     
     def __init__(self):
@@ -27,17 +27,17 @@ class MultiprocessingCleaner:
         self.cleanup_registered = False
         
     def register_process(self, process: mp.Process):
-        """プロセスを登録してクリーンアップ対象に追加"""
+        """Register process for cleanup management"""
         self.active_processes.append(process)
         self._ensure_cleanup_registered()
         
     def register_queue(self, queue: mp.Queue):
-        """キューを登録してクリーンアップ対象に追加"""
+        """Register queue for cleanup management"""
         self.active_queues.append(queue)
         self._ensure_cleanup_registered()
         
     def _ensure_cleanup_registered(self):
-        """クリーンアップハンドラーが登録されていることを確認"""
+        """Ensure cleanup handlers are registered"""
         if not self.cleanup_registered:
             atexit.register(self.cleanup_all)
             signal.signal(signal.SIGTERM, self._signal_handler)
@@ -46,7 +46,7 @@ class MultiprocessingCleaner:
             log_info(logger, "Multiprocessing cleanup handlers registered")
             
     def _signal_handler(self, signum, frame):
-        """シグナルハンドラー"""
+        """Signal handler for cleanup"""
         log_info(logger, f"Received signal {signum}, cleaning up multiprocessing resources")
         self.cleanup_all()
         # Exit after cleanup
@@ -60,14 +60,14 @@ class MultiprocessingCleaner:
             sys.exit(0)
         
     def cleanup_all(self):
-        """全てのマルチプロセシングリソースをクリーンアップ"""
+        """Cleanup all multiprocessing resources"""
         try:
-            # プロセスのクリーンアップ
+            # Process cleanup
             for process in self.active_processes[:]:
                 self.cleanup_process(process)
             self.active_processes.clear()
             
-            # キューのクリーンアップ
+            # Queue cleanup
             for queue in self.active_queues[:]:
                 self.cleanup_queue(queue)
             self.active_queues.clear()
@@ -78,7 +78,7 @@ class MultiprocessingCleaner:
             log_warning(logger, f"Error during multiprocessing cleanup: {e}")
             
     def cleanup_process(self, process: mp.Process):
-        """単一プロセスのクリーンアップ"""
+        """Cleanup single process"""
         try:
             if process and process.is_alive():
                 log_info(logger, f"Terminating process PID: {process.pid}")
@@ -111,7 +111,7 @@ class MultiprocessingCleaner:
             log_warning(logger, f"Error cleaning up process: {e}")
             
     def cleanup_queue(self, queue: mp.Queue):
-        """単一キューのクリーンアップ"""
+        """Cleanup single queue"""
         try:
             if queue:
                 # Clear remaining items
@@ -130,12 +130,12 @@ class MultiprocessingCleaner:
             log_warning(logger, f"Error cleaning up queue: {e}")
             
     def remove_process(self, process: mp.Process):
-        """リストからプロセスを削除"""
+        """Remove process from list"""
         if process in self.active_processes:
             self.active_processes.remove(process)
             
     def remove_queue(self, queue: mp.Queue):
-        """リストからキューを削除"""
+        """Remove queue from list"""
         if queue in self.active_queues:
             self.active_queues.remove(queue)
 
@@ -145,25 +145,25 @@ _global_cleaner = MultiprocessingCleaner()
 
 
 def register_multiprocessing_process(process: mp.Process):
-    """グローバルクリーナーにプロセスを登録"""
+    """Register process with global cleaner"""
     _global_cleaner.register_process(process)
     
 
 def register_multiprocessing_queue(queue: mp.Queue):
-    """グローバルクリーナーにキューを登録"""
+    """Register queue with global cleaner"""
     _global_cleaner.register_queue(queue)
     
 
 def cleanup_multiprocessing_resources():
-    """全てのマルチプロセシングリソースを手動でクリーンアップ"""
+    """Manually cleanup all multiprocessing resources"""
     _global_cleaner.cleanup_all()
     
 
 def force_cleanup_resource_tracker():
     """
-    resource_trackerプロセスの強制クリーンアップ
+    Force cleanup of resource_tracker process
     
-    注意: これは最後の手段として使用してください
+    Warning: Use this as a last resort.
     """
     try:
         import subprocess

@@ -83,10 +83,10 @@ class PoseSharedMemoryManager:
                 create=True, 
                 size=self.shm_size
             )
-            log_info(get_logger('simpyros.pose_memory'), f"✅ 共有メモリ作成(Pose): {self.shm_name}, {self.shm_size} bytes")
+            log_info(get_logger('simpyros.pose_memory'), f"✅ Created shared memory (Pose): {self.shm_name}, {self.shm_size} bytes")
             
         except Exception as e:
-            log_error(get_logger('simpyros.pose_memory'), f"❌ 共有メモリ作成失敗: {e}")
+            log_error(get_logger('simpyros.pose_memory'), f"❌ Failed to create shared memory: {e}")
             raise
         
         # Initialize memory
@@ -241,7 +241,7 @@ class PoseSharedMemoryManager:
         try:
             self.shm.close()
             self.shm.unlink()
-            log_info(get_logger('simpyros.pose_memory'), f"🧹 共有メモリクリーンアップ: {self.shm_name}")
+            log_info(get_logger('simpyros.pose_memory'), f"🧹 Shared memory cleanup: {self.shm_name}")
         except:
             pass
 
@@ -329,7 +329,7 @@ class PyVistaVisualizationProcess:
             self.plotter.add_axes()
             log_info(get_logger('simpyros.pyvista_process'), "✅ Axes added")
             
-            log_info(get_logger('simpyros.pyvista_process'), f"🚀 PyVista可視化プロセス開始 ({'Interactive' if interactive_mode else 'Headless'} mode)")
+            log_info(get_logger('simpyros.pyvista_process'), f"🚀 PyVista visualization process started ({'Interactive' if interactive_mode else 'Headless'} mode)")
             
             # Connect to shared memory
             self.shm = shared_memory.SharedMemory(name=self.shm_name)
@@ -347,7 +347,7 @@ class PyVistaVisualizationProcess:
         except KeyboardInterrupt:
             log_info(get_logger('simpyros.pyvista_process'), f"⌨️ PyVista process terminated by signal (PID: {os.getpid()})")
         except Exception as e:
-            log_error(get_logger('simpyros.pyvista_process'), f"❌ PyVista可視化プロセスエラー: {e}")
+            log_error(get_logger('simpyros.pyvista_process'), f"❌ PyVista visualization process error: {e}")
             import traceback
             traceback.print_exc()
         finally:
@@ -360,7 +360,7 @@ class PyVistaVisualizationProcess:
                     log_info(get_logger('simpyros.pyvista_process'), "✅ Plotter closed")
                 except:
                     pass
-            log_info(get_logger('simpyros.pyvista_process'), f"🛑 PyVista可視化プロセス終了 (PID: {os.getpid()})")
+            log_info(get_logger('simpyros.pyvista_process'), f"🛑 PyVista visualization process terminated (PID: {os.getpid()})")
             
     def _setup_scene(self):
         """Setup initial PyVista scene"""
@@ -829,14 +829,14 @@ class ProcessSeparatedPyVistaVisualizer:
             if self.viz_process.is_alive():
                 log_info(self.logger, f"✅ Visualization process is running (PID: {self.viz_process.pid})")
                 self.is_initialized = True
-                log_info(self.logger, "✅ ProcessSeparatedPyVistaVisualizer 初期化完了")
+                log_info(self.logger, "✅ ProcessSeparatedPyVistaVisualizer initialization completed")
                 return True
             else:
                 log_error(self.logger, f"❌ Visualization process died (exit code: {self.viz_process.exitcode})")
                 return False
             
         except Exception as e:
-            log_error(self.logger, f"❌ 初期化失敗: {e}")
+            log_error(self.logger, f"❌ Initialization failed: {e}")
             import traceback
             traceback.print_exc()
             return False
