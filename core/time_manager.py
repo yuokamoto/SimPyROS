@@ -8,6 +8,7 @@ RealtimeEnvironment for reliable real-time synchronization.
 
 import simpy.rt
 import time
+import math
 import threading
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -131,8 +132,8 @@ class TimeManager:
         # Validate factor range
         if factor <= 0:
             factor = 0.001  # Minimum to prevent issues
-        elif factor > 10.0:
-            factor = 10.0  # Reasonable upper limit
+        elif factor > 100.0:
+            factor = 100.0  # Reasonable upper limit
             
         with self._lock:
             self._real_time_factor = factor
@@ -165,28 +166,14 @@ class TimeManager:
             
         # Calculate required adjustment to bring actual speed back to target
         overspeed_factor = actual_ratio / self._real_time_factor
-        
         # Apply speed reduction by slightly increasing SimPy factor (slower simulation)
-        if overspeed_factor > 1.1:  # Significant overspeed (>10%)
-            # Try to adjust SimPy factor to slow down simulation
-            adjustment_factor = 1.0 + (overspeed_factor - 1.0) * self._speed_limit_correction_factor  # Gradual correction
-            new_simpy_factor = (1.0 / self._real_time_factor) * adjustment_factor
+        # Try to adjust SimPy factor to slow down simulation
+        adjustment_factor = 1.0 + (overspeed_factor - 1.0) * self._speed_limit_correction_factor  # Gradual correction
+        new_simpy_factor = (1.0 / self._real_time_factor) * adjustment_factor
+        print(overspeed_factor, adjustment_factor, new_simpy_factor)
+
+        # set_real_time_factor(new_simpy_factor)
             
-            try:
-                with self._lock:
-                    # Some SimPy versions may not allow factor modification after creation
-                    if hasattr(self.env, '_factor'):
-                        self.env._factor = new_simpy_factor
-                    else:
-                        self.env.factor = new_simpy_factor
-                        
-                log_warning(self.logger, f"Speed limit enforced: actual {actual_ratio:.2f}x > target {self._real_time_factor:.2f}x, adjusted SimPy factor to {new_simpy_factor:.3f}")
-            except AttributeError:
-                # Factor cannot be modified - this is expected in some SimPy versions
-                log_info(self.logger, f"Speed limit detected but cannot adjust: actual {actual_ratio:.2f}x > target {self._real_time_factor:.2f}x (SimPy RealtimeEnvironment factor is read-only)")
-            except Exception as e:
-                log_warning(self.logger, f"Speed limit adjustment failed: {e}")
-    
     def set_speed_limit_enabled(self, enabled: bool):
         """Enable or disable automatic speed limiting"""
         self._enforce_speed_limit_enabled = enabled
@@ -210,8 +197,9 @@ class TimeManager:
             
             if real_elapsed > 0 and sim_time > 0:
                 actual_ratio = sim_time / real_elapsed
-                if actual_ratio > self._real_time_factor * 1.05:  # 5% tolerance
-                    self._enforce_speed_limit(actual_ratio)
+                # print(actual_ratio)
+                # if math.fabs(actual_ratio/self._real_time_factor -1) > 0.2:  # 5% tolerance
+                    # self._enforce_speed_limit(actual_ratio)
     
     def get_timing_stats(self) -> TimingStats:
         """Get comprehensive timing statistics with actual speed limiting"""
@@ -225,8 +213,8 @@ class TimeManager:
                 actual_speed = f"{actual_ratio:.1f}x"
                 
                 # Check if actual speed exceeds target - apply speed limiting if needed
-                if actual_ratio > self._real_time_factor * 1.05:  # 5% tolerance
-                    self._enforce_speed_limit(actual_ratio)
+                # if actual_ratio > self._real_time_factor * 1.05:  # 5% tolerance
+                #     self._enforce_speed_limit(actual_ratio)
                     
             else:
                 actual_speed = "N/A"

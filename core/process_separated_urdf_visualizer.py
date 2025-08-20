@@ -134,8 +134,8 @@ class ProcessSeparatedURDFRobotVisualizer(ProcessSeparatedPyVistaVisualizer):
                     self.last_update_time = self._get_current_time()
                     
                     # デバッグ出力（間引き）
-                    if self.update_count <= 5 or self.update_count % 100 == 0:
-                        print(f"🔄 Pose update #{self.update_count}: {robot_name} ({len(link_poses)} links)")
+                    # if self.update_count <= 5 or self.update_count % 100 == 0:
+                    #     print(f"🔄 Pose update #{self.update_count}: {robot_name} ({len(link_poses)} links)")
                         
             else:
                 print(f"⚠️ Robot {robot_name} has no get_link_poses method")

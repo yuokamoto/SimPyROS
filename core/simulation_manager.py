@@ -1455,42 +1455,27 @@ class SimulationManager:
         if hasattr(self.monitor, 'running') and not self.monitor.running:
             return
             
+        
         try:
             # Get timing stats
             timing_stats = self.time_manager.get_timing_stats() if self.time_manager else None
-            
             # Calculate timing accuracy
             timing_accuracy = 0.0
             if timing_stats and timing_stats.real_time_elapsed > 0 and timing_stats.sim_time > 0:
                 actual_factor = timing_stats.sim_time / timing_stats.real_time_elapsed
-                error_percent = abs(actual_factor - timing_stats.real_time_factor) / timing_stats.real_time_factor * 100
-                timing_accuracy = 100.0 - error_percent
-            
-            # Calculate detailed timing information
-            actual_factor = 0.0
-            accuracy_text = "N/A"
-            
-            if timing_stats and timing_stats.real_time_elapsed > 0 and timing_stats.sim_time > 0:
-                actual_factor = timing_stats.sim_time / timing_stats.real_time_elapsed
-                error_percent = abs(actual_factor - timing_stats.real_time_factor) / timing_stats.real_time_factor * 100
-                
-                # Create accuracy rating
-                if error_percent < 5:
-                    accuracy_text = f"EXCELLENT ({error_percent:.1f}%)"
-                elif error_percent < 15:
-                    accuracy_text = f"GOOD ({error_percent:.1f}%)"
-                elif error_percent < 30:
-                    accuracy_text = f"FAIR ({error_percent:.1f}%)"
+                if timing_stats.real_time_factor > 0:
+                    error_percent = abs(actual_factor - timing_stats.real_time_factor) / timing_stats.real_time_factor * 100
+                    timing_accuracy = 100.0 - error_percent
                 else:
-                    accuracy_text = f"POOR ({error_percent:.1f}%)"
-            
+                    error_percent = 'N/A'
+                    timing_accuracy = 'N/A'
+                        
             # Prepare enhanced monitor data
             monitor_data = {
                 'sim_time': timing_stats.sim_time if timing_stats else 0.0,
                 'target_rtf': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
                 'actual_rtf': f"{actual_factor:.2f}x" if actual_factor > 0 else "N/A",
                 'time_step': (self.config.time_step * 1000),  # Convert to milliseconds
-                'timing_accuracy': accuracy_text,
                 'fps': 1.0 / self.config.time_step,
                 'visualization': self.config.visualization_backend if self.config.visualization else 'headless',
                 'robots': len(self.robots),
