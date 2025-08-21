@@ -47,45 +47,6 @@ except ImportError:
     _module_logger = get_logger(__name__)
     log_error(_module_logger, "yourdfpy not available. Install with: pip install yourdfpy")
 
-# URDF Loading Cache for Performance Optimization
-URDF_CACHE = {}  # urdf_path -> (parsed_urdf, timestamp)
-CACHE_TTL = 300  # Cache Time-To-Live in seconds (5 minutes)
-
-def _is_cache_valid(urdf_path: str) -> bool:
-    """Check if cached URDF is still valid"""
-    if urdf_path not in URDF_CACHE:
-        return False
-    
-    cached_data, cache_time = URDF_CACHE[urdf_path]
-    current_time = time.time()
-    
-    # Check if cache has expired
-    if current_time - cache_time > CACHE_TTL:
-        del URDF_CACHE[urdf_path]
-        return False
-    
-    # Check if file has been modified
-    try:
-        file_mtime = os.path.getmtime(urdf_path)
-        if file_mtime > cache_time:
-            del URDF_CACHE[urdf_path]
-            return False
-    except OSError:
-        # File doesn't exist anymore
-        del URDF_CACHE[urdf_path]
-        return False
-    
-    return True
-
-def _get_cached_urdf(urdf_path: str):
-    """Get cached URDF if valid"""
-    if _is_cache_valid(urdf_path):
-        return URDF_CACHE[urdf_path][0]
-    return None
-
-def _cache_urdf(urdf_path: str, parsed_urdf):
-    """Cache parsed URDF"""
-    URDF_CACHE[urdf_path] = (parsed_urdf, time.time())
 
 # Try trimesh for mesh handling
 try:
@@ -94,8 +55,6 @@ try:
 except ImportError:
     TRIMESH_AVAILABLE = False
 
-# Global URDF template cache
-_URDF_TEMPLATE_CACHE = {}
 
 
 @dataclass
@@ -127,7 +86,7 @@ class URDFJoint:
 class URDFLoader:
     """Unified URDF loader with mesh loading, optimization, and template caching support"""
     
-    def __init__(self, package_path: Optional[str] = None, enable_mesh_optimization: bool = True, use_template_cache: bool = True):
+    def __init__(self, package_path: Optional[str] = None, enable_mesh_optimization: bool = True):
         self.package_path = package_path
         self.urdf_object = None
         self.links: Dict[str, URDFLink] = {}
@@ -141,9 +100,6 @@ class URDFLoader:
         
         # Path resolution context
         self._urdf_dir = None
-        
-        # Template caching settings
-        self.use_template_cache = use_template_cache
         
         # Initialize logger for this instance
         self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
@@ -169,21 +125,9 @@ class URDFLoader:
         # Store URDF directory for relative path resolution
         self._urdf_dir = os.path.dirname(os.path.abspath(urdf_path))
         
-        # Create cache key from absolute path and modification time
-        abs_urdf_path = os.path.abspath(urdf_path)
-        cache_key = self._get_cache_key(abs_urdf_path)
-        
-        # Try to load from template cache first
-        if self.use_template_cache and cache_key in _URDF_TEMPLATE_CACHE:
-            return self._load_from_template_cache(cache_key)
-        
         try:
             if URDF_LIBRARY == "yourdfpy":
-                success = self._load_with_yourdfpy(urdf_path)
-                # Cache the successfully loaded template
-                if success and self.use_template_cache:
-                    self._cache_template(cache_key, abs_urdf_path)
-                return success
+                return self._load_with_yourdfpy(urdf_path)
             else:
                 log_error(self.logger, f"Unsupported URDF library: {URDF_LIBRARY}")
                 return False
@@ -193,19 +137,10 @@ class URDFLoader:
             return False
     
     def _load_with_yourdfpy(self, urdf_path: str) -> bool:
-        """Load URDF using yourdfpy with caching"""
+        """Load URDF using yourdfpy"""
         try:
-            # Try to get from cache first
-            cached_urdf = _get_cached_urdf(urdf_path)
-            if cached_urdf is not None:
-                log_debug(self.logger, f"Using cached URDF: {urdf_path}")
-                self.urdf_object = cached_urdf
-            else:
-                log_info(self.logger, f"Loading URDF with yourdfpy: {urdf_path}")
-                self.urdf_object = urdf_lib.URDF.load(urdf_path)
-                # Cache the parsed URDF
-                _cache_urdf(urdf_path, self.urdf_object)
-                
+            log_info(self.logger, f"Loading URDF with yourdfpy: {urdf_path}")
+            self.urdf_object = urdf_lib.URDF.load(urdf_path)
             self.robot_name = getattr(self.urdf_object, 'name', 'unknown_robot')
             
             self._extract_links_joints_yourdfpy()
@@ -216,64 +151,6 @@ class URDFLoader:
             log_error(self.logger, f"yourdfpy loading failed: {e}")
             return False
     
-    def _get_cache_key(self, urdf_path: str) -> str:
-        """Generate cache key from URDF path and modification time"""
-        try:
-            mtime = os.path.getmtime(urdf_path)
-            return f"{urdf_path}:{mtime}"
-        except OSError:
-            return f"{urdf_path}:0"
-    
-    def _load_from_template_cache(self, cache_key: str) -> bool:
-        """Load URDF data from template cache"""
-        try:
-            cached_data = _URDF_TEMPLATE_CACHE[cache_key]
-            self.urdf_object = cached_data['urdf_object']
-            self.robot_name = cached_data['robot_name'] 
-            self.links = copy.deepcopy(cached_data['links'])
-            self.joints = copy.deepcopy(cached_data['joints'])
-            self._urdf_dir = cached_data['urdf_dir']
-            log_info(self.logger, f"Loaded from template cache: {cached_data['urdf_path']}")
-            return True
-        except Exception as e:
-            log_warning(self.logger, f"Template cache load failed: {e}")
-            # Remove corrupted cache entry
-            if cache_key in _URDF_TEMPLATE_CACHE:
-                del _URDF_TEMPLATE_CACHE[cache_key]
-            return False
-    
-    def _cache_template(self, cache_key: str, urdf_path: str):
-        """Cache the successfully loaded URDF template"""
-        try:
-            _URDF_TEMPLATE_CACHE[cache_key] = {
-                'urdf_object': self.urdf_object,
-                'robot_name': self.robot_name,
-                'links': copy.deepcopy(self.links),
-                'joints': copy.deepcopy(self.joints), 
-                'urdf_dir': self._urdf_dir,
-                'urdf_path': urdf_path,
-                'cache_time': time.time()
-            }
-            log_info(self.logger, f"Cached URDF template: {urdf_path}")
-        except Exception as e:
-            log_warning(self.logger, f"Template caching failed: {e}")
-    
-    @staticmethod
-    def get_cache_stats() -> Dict[str, Any]:
-        """Get template cache statistics"""
-        return {
-            'total_templates': len(_URDF_TEMPLATE_CACHE),
-            'cached_files': [data['urdf_path'] for data in _URDF_TEMPLATE_CACHE.values()],
-            'cache_size_mb': sys.getsizeof(_URDF_TEMPLATE_CACHE) / (1024 * 1024)
-        }
-    
-    @staticmethod
-    def clear_template_cache():
-        """Clear the entire template cache"""
-        global _URDF_TEMPLATE_CACHE
-        _URDF_TEMPLATE_CACHE.clear()
-        # Use module logger for static method
-        log_info(_module_logger, "URDF template cache cleared")
     
     def _extract_links_joints_yourdfpy(self):
         """Extract links and joints from yourdfpy URDF object"""

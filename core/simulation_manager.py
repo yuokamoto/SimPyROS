@@ -34,7 +34,6 @@ from core.robot import Robot, create_robot_from_urdf, RobotParameters
 from core.simulation_object import SimulationObject, ObjectParameters, Pose, Velocity
 from core.pyvista_visualizer import URDFRobotVisualizer, create_urdf_robot_visualizer
 # Removed unused import: from core.unified_pyvista_visualizer import UnifiedPyVistaVisualizer, create_unified_visualizer
-from core.meshcat_visualizer import MeshCatURDFRobotVisualizer, create_meshcat_visualizer
 from core.time_manager import TimeManager, set_global_time_manager
 from core.process_separated_urdf_visualizer import create_process_separated_urdf_visualizer
 from core.simulation_monitor import create_simulation_monitor
@@ -54,14 +53,11 @@ class SimulationConfig:
     enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
     
     # Visualization backend settings
-    visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'meshcat', 'process_separated_pyvista'
+    visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'process_separated_pyvista'
     # Removed deprecated use_optimized_visualizer option - use visualization_backend instead
     visualization_optimization_level: str = 'balanced'  # 'performance', 'balanced', 'quality'
     enable_batch_rendering: bool = True  # Enable batch rendering for multiple robots
     
-    # MeshCat-specific settings
-    meshcat_port: int = 7000  # Port for MeshCat server
-    meshcat_open_browser: bool = True  # Open browser automatically for MeshCat
     
     # Process-separated PyVista settings
     max_robots: int = 5  # Maximum number of robots for shared memory (デフォルト値を小さく)
@@ -128,7 +124,7 @@ class SimulationManager:
         
         # Core components - use RealtimeEnvironment
         self.time_manager: Optional[TimeManager] = None
-        self.visualizer: Optional[Union[URDFRobotVisualizer, MeshCatURDFRobotVisualizer]] = None
+        self.visualizer: Optional[URDFRobotVisualizer] = None
         self.monitor = None  # Simulation monitor window
         
         # Simulation state
@@ -233,14 +229,7 @@ class SimulationManager:
             log_info(self.logger, f"Initializing visualization backend: {backend}")
             
             try:
-                if backend == 'meshcat':
-                    log_info(self.logger, f"Creating MeshCat visualizer (port: {self.config.meshcat_port})")
-                    self.visualizer = create_meshcat_visualizer(
-                        port=self.config.meshcat_port,
-                        open_browser=self.config.meshcat_open_browser
-                    )
-                    
-                elif backend == 'process_separated_pyvista':
+                if backend == 'process_separated_pyvista':
                     log_info(self.logger, "Creating process-separated PyVista visualizer")
                     from core.process_separated_pyvista import SharedMemoryConfig
                     config = SharedMemoryConfig(
@@ -275,11 +264,7 @@ class SimulationManager:
                     log_success(self.logger, f"{backend} visualization system initialized")
                     
                     # Print backend-specific info
-                    if backend == 'meshcat':
-                        log_info(self.logger, f"MeshCat server: http://127.0.0.1:{self.config.meshcat_port}/static/")
-                        log_info(self.logger, "Web-based interface with mesh support")
-                        
-                    elif backend == 'process_separated_pyvista':
+                    if backend == 'process_separated_pyvista':
                         log_debug(self.logger, "Process separation: ENABLED")
                         log_debug(self.logger, f"Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")
                         log_debug(self.logger, "Crash isolation: PyVista crashes don't affect simulation")

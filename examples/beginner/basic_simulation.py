@@ -10,7 +10,7 @@ Usage:
     
 Options:
     --visualization, --vis       Enable visualization (default: False)
-    --visualization-backend      Visualization backend: pyvista, meshcat, process_separated_pyvista (default: process_separated_pyvista)
+    --visualization-backend      Visualization backend: pyvista, process_separated_pyvista (default: process_separated_pyvista)
     --real-time-factor, --rtf N  Set real-time speed multiplier (default: 1.0)
     --example {simple,mobile,multi,performance,all}  Choose which example to run (default: all)
     --num-robots N               Number of robots for performance demo (default: 10)
@@ -21,7 +21,7 @@ Examples:
     python basic_simulation.py                           # Run all examples headless at 1x speed
     python basic_simulation.py --vis                     # Run all examples with PyVista visualization
     python basic_simulation.py --vis --enable-monitor    # Run with visualization and monitor window
-    python basic_simulation.py --vis --visualization-backend meshcat  # Run with MeshCat web visualization
+    python basic_simulation.py --vis --visualization-backend pyvista  # Run with standard PyVista
     python basic_simulation.py --vis --visualization-backend pyvista  # Standard PyVista
     python basic_simulation.py --rtf 2.0                 # Run at 2x speed
     python basic_simulation.py --example simple --vis    # Default process-separated PyVista
@@ -70,7 +70,7 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         unified_process: Use unified event-driven process architecture
         visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
-        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
+        visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
     """
     print("🤖 Simple Control Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
@@ -141,7 +141,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
         unified_process: Use unified event-driven process architecture
         visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
-        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
+        visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
     """
     print("🚗 Mobile Robot Example")
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
@@ -211,7 +211,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         unified_process: Use unified event-driven process architecture
         visualization: Enable visualization
         real_time_factor: Real-time speed multiplier
-        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
+        visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
     """
     print("🤖🤖 Multi-Robot Example")  
     print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
@@ -295,7 +295,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         use_frequency_grouping: Enable frequency grouping optimization (default: True for max performance)
         real_time_factor: Real-time speed multiplier (default: 10.0 for high-speed test)
         visualization: Enable visualization (default: False for maximum performance)
-        visualization_backend: Visualization backend (pyvista, meshcat, process_separated_pyvista)
+        visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
         duration: Simulation duration in seconds (default: 10.0 for comprehensive test)
     """
     logger.info(f"🚀 {num_robots} Robots Maximum Speed Performance Test")
@@ -557,7 +557,7 @@ def main():
     parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
     parser.add_argument('--visualization', '--vis', action='store_true', 
                        help='Enable visualization (default: False)')
-    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'meshcat', 'process_separated_pyvista'], default='process_separated_pyvista',
+    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'process_separated_pyvista'], default='process_separated_pyvista',
                        help='Visualization backend (default: process_separated_pyvista)')
     parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
                        help='Real-time speed multiplier (default: 1.0)')

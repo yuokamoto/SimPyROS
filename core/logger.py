@@ -40,7 +40,7 @@ def _ensure_log_directory():
 
 def _get_component_from_name(name: str) -> str:
     """Extract component type from logger name"""
-    if 'pyvista' in name or 'visualizer' in name or 'meshcat' in name:
+    if 'pyvista' in name or 'visualizer' in name:
         return 'visualization'
     elif 'simulation_manager' in name or 'simulation_object' in name:
         return 'simulation'
