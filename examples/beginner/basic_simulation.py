@@ -332,8 +332,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         # Available robot types for random selection
         robot_types = [
             ("mobile", "examples/robots/mobile_robot.urdf"),
-            ("arm", "examples/robots/articulated_arm_robot.urdf"),
-            ("collision", "examples/robots/collision_robot.urdf")
+            ("arm", "examples/robots/articulated_arm_robot.urdf")
         ]
         
         # Create robots optimized for maximum performance
@@ -387,7 +386,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
             
             # Get movable joints for arm robots
             movable_joints = []
-            if robot_type in ["arm", "collision"]:
+            if robot_type == "arm":
                 movable_joints = [name for name in robot_instance.get_joint_names() 
                                 if robot_instance.joints[name].joint_type.value != 'fixed']
             
@@ -426,7 +425,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
                     
                     sim.set_robot_velocity(robot_name, velocity)
                     
-                elif robot_type in ["arm", "collision"]:
+                elif robot_type == "arm":
                     # Robot arm joint movement patterns
                     for i, joint_name in enumerate(movable_joints):
                         amplitude = 0.3 + (pattern % 3) * 0.2  # Varying amplitude: 0.3-0.7
