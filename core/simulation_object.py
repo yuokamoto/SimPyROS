@@ -193,8 +193,9 @@ class ObjectParameters:
     urdf_path: Optional[str] = None
     sdf_path: Optional[str] = None
     initial_pose: Pose = Pose()
-    update_interval: float = 0.1  # seconds
+    update_rate: float = 10.0  # Hz
     frequency_grouping_managed: bool = False  # If True, disable individual motion process
+    unified_process: bool = False  # If True, use unified event-driven process instead of separate motion process
 
 
 class SimulationObject:
@@ -213,43 +214,70 @@ class SimulationObject:
         self.relative_poses: Dict['SimulationObject', Pose] = {}
         self._connection_lock = threading.Lock()
         
-        # Independent SimPy process for object motion
+        # Independent SimPy processes for different subsystems
         self._motion_process = None
+        self._sensor_process = None
+        self._navigation_process = None
         self._process_active = False
         
-        # Start motion process for dynamic objects
+        # Unified process system (moved from Robot class)
+        self._unified_process = None
+        self.use_unified_process = getattr(parameters, 'unified_process', False)
+        
+        # Event-driven optimization
+        self._event_lock = threading.Lock()
+        
+        # Navigation functionality - pluggable navigation system
+        self._navigation_controller = None  # Will be set when navigation is configured
+        
+        # Sensor functionality - pluggable sensor system
+        self._sensor_manager = None  # Will be set when sensors are configured
+        
+        # Start processes for dynamic objects
         if self.parameters.object_type == ObjectType.DYNAMIC:
-            self._start_motion_process()
+            if self.use_unified_process:
+                self._start_unified_update_process()
+            else:
+                self._start_separate_update_processes()
     
-    def _start_motion_process(self):
-        """Start independent SimPy process for object motion"""
-        if not self._process_active and self.parameters.object_type == ObjectType.DYNAMIC:
+    def _start_separate_update_processes(self):
+        """Start separate SimPy processes for motion, sensors, and navigation"""
+        if not self._process_active:
             # Check if motion is managed by FrequencyGrouping
             if self.parameters.frequency_grouping_managed:
-                print(f"🔄 SimulationObject '{self.parameters.name}': Motion process management delegated to FrequencyGrouping")
+                print(f"🔄 SimulationObject '{self.parameters.name}': Process management delegated to FrequencyGrouping")
                 return
                 
             self._process_active = True
-            self._motion_process = self.env.process(self._motion_process_loop())
-            print(f"🔄 SimulationObject '{self.parameters.name}': Motion process started")
+            
+            # Start motion update process
+            if self.parameters.object_type == ObjectType.DYNAMIC:
+                self._motion_process = self.env.process(self._motion_update_loop())
+                print(f"🔄 SimulationObject '{self.parameters.name}': Motion process started")
+            
+            # Start sensor update process if sensors are available
+            if self._sensor_manager:
+                self._sensor_process = self.env.process(self._sensor_update_loop())
+                print(f"🔄 SimulationObject '{self.parameters.name}': Sensor process started")
+            
+            # Start navigation update process if navigation is available
+            if self._navigation_controller:
+                self._navigation_process = self.env.process(self._navigation_update_loop())
+                print(f"🔄 SimulationObject '{self.parameters.name}': Navigation process started")
     
-    def _motion_process_loop(self) -> Generator:
+    def _motion_update_loop(self) -> Generator:
         """Independent SimPy process for object motion updates - Event-driven optimization"""
-        dt = self.parameters.update_interval
+        dt = 1.0 / self.parameters.update_rate
         idle_timeout = 0.1  # 10Hz when idle
+        timeout = idle_timeout
         
         while self._process_active:
             try:
-                # Only update if this is a dynamic object AND has motion
-                if (self.parameters.object_type == ObjectType.DYNAMIC and 
-                    self._has_motion()):
-                    
+                # Only update if this  has motion                
+                if self._has_motion():                
                     self._update_state(dt)
                     # Use normal update interval when active
                     timeout = dt
-                else:
-                    # Use longer timeout when idle (no motion)
-                    timeout = idle_timeout
                     
             except Exception as e:
                 print(f"⚠️ SimulationObject '{self.parameters.name}' motion error: {e}")
@@ -257,6 +285,40 @@ class SimulationObject:
             
             # Yield control with adaptive timeout
             yield self.env.timeout(timeout)
+    
+    def _sensor_update_loop(self) -> Generator:
+        """Independent SimPy process for sensor updates"""
+        sensor_dt = 1.0 / 20.0  # Default 20Hz for sensors
+        
+        while self._process_active:
+            try:
+                if self._sensor_manager:
+                    current_time = self.time_manager.get_sim_time() if self.time_manager else self.env.now
+                    self._sensor_manager.update_all_sensors(current_time, self.pose, self.velocity)
+                    
+            except Exception as e:
+                print(f"⚠️ SimulationObject '{self.parameters.name}' sensor error: {e}")
+            
+            # Yield control
+            yield self.env.timeout(sensor_dt)
+    
+    def _navigation_update_loop(self) -> Generator:
+        """Independent SimPy process for navigation updates"""
+        nav_dt = 1.0 / 10.0  # Default 10Hz for navigation
+        
+        while self._process_active:
+            try:
+                if self._navigation_controller and hasattr(self._navigation_controller, 'is_active'):
+                    if self._navigation_controller.is_active:
+                        # Navigation controller will handle its own updates
+                        # This loop is mainly for monitoring and cleanup
+                        pass
+                    
+            except Exception as e:
+                print(f"⚠️ SimulationObject '{self.parameters.name}' navigation error: {e}")
+            
+            # Yield control
+            yield self.env.timeout(nav_dt)
     
     def _has_motion(self) -> bool:
         """Check if object has non-zero velocity or is connected to moving objects"""
@@ -272,14 +334,120 @@ class SimulationObject:
         
         return False
     
-    def stop_motion_process(self):
-        """Stop the motion process"""
+    def _start_unified_update_process(self):
+        """Start unified process for all object subsystems"""
+        if not self._process_active and self.parameters.object_type == ObjectType.DYNAMIC:
+            # Check if motion is managed by FrequencyGrouping
+            if self.parameters.frequency_grouping_managed:
+                print(f"🔄 SimulationObject '{self.parameters.name}': Unified process management delegated to FrequencyGrouping")
+                return
+                
+            self._process_active = True
+            self._unified_process = self.env.process(self._unified_event_driven_loop())
+            print(f"🔄 SimulationObject '{self.parameters.name}': Unified process started")
+    
+    def _unified_event_driven_loop(self) -> Generator:
+        """Unified event-driven process combining all object subsystems"""
+        last_motion_update = 0.0
+        last_sensor_update = 0.0
+        last_navigation_update = 0.0
+        
+        motion_dt = 1.0 / self.parameters.update_rate
+        sensor_dt = 1.0 / 20.0  # 20Hz for sensors
+        navigation_dt = 1.0 / 10.0  # 10Hz for navigation
+        base_timeout = 0.1  # 10Hz base monitoring
+        
+        while self._process_active:
+            current_time = self.time_manager.get_sim_time() if self.time_manager else self.env.now
+            active_updates = False
+            
+            try:
+                # 1. Motion updates (periodic with motion detection)
+                if (current_time - last_motion_update) >= motion_dt:
+                    
+                    # Use consistent motion detection method                    
+                    if (self.parameters.object_type == ObjectType.DYNAMIC and 
+                        self._has_motion()):
+
+                        self._update_state(motion_dt)
+                        active_updates = True
+                    
+                    last_motion_update = current_time
+                
+                # 2. Sensor updates
+                if (self._sensor_manager and 
+                    (current_time - last_sensor_update) >= sensor_dt):
+                    
+                    self._sensor_manager.update_all_sensors(current_time, self.pose, self.velocity)
+                    last_sensor_update = current_time
+                    active_updates = True
+                
+                # 3. Navigation updates
+                if (self._navigation_controller and 
+                    (current_time - last_navigation_update) >= navigation_dt):
+                    
+                    if hasattr(self._navigation_controller, 'is_active') and self._navigation_controller.is_active:
+                        # Navigation controller handles its own updates
+                        pass
+                    last_navigation_update = current_time
+                    active_updates = True
+                
+                # 4. Allow subclasses to add custom updates (e.g., joint control for robots)
+                active_updates = self._unified_process_custom_updates(current_time, active_updates) or active_updates
+                
+            except Exception as e:
+                print(f"⚠️ SimulationObject '{self.parameters.name}' unified process error: {e}")
+            
+            # Dynamic timeout based on activity
+            if active_updates:
+                # High frequency when active - use shortest interval
+                timeout = min(motion_dt, sensor_dt, navigation_dt) / 2
+            else:
+                # Lower frequency when idle
+                timeout = base_timeout
+            
+            # Yield control
+            yield self.env.timeout(timeout)
+    
+    def _unified_process_custom_updates(self, current_time: float, active_updates: bool) -> bool:
+        """Override in subclasses to add custom unified process updates"""
+        return False
+    
+    def stop_update_process(self):
+        """Stop all update processes"""
         self._process_active = False
+        
+        # Stop separate processes
         if self._motion_process:
             try:
                 self._motion_process.interrupt()
                 self._motion_process = None
                 print(f"🛑 SimulationObject '{self.parameters.name}': Motion process stopped")
+            except Exception:
+                pass
+        
+        if self._sensor_process:
+            try:
+                self._sensor_process.interrupt()
+                self._sensor_process = None
+                print(f"🛑 SimulationObject '{self.parameters.name}': Sensor process stopped")
+            except Exception:
+                pass
+        
+        if self._navigation_process:
+            try:
+                self._navigation_process.interrupt()
+                self._navigation_process = None
+                print(f"🛑 SimulationObject '{self.parameters.name}': Navigation process stopped")
+            except Exception:
+                pass
+        
+        # Stop unified process
+        if self._unified_process:
+            try:
+                self._unified_process.interrupt()
+                self._unified_process = None
+                print(f"🛑 SimulationObject '{self.parameters.name}': Unified process stopped")
             except Exception:
                 pass
     
@@ -310,13 +478,6 @@ class SimulationObject:
         # Update all connected objects (thread-safe)
         self._update_connected_objects()
     
-    def _normalize_angle(self, angle: float) -> float:
-        while angle > math.pi:
-            angle -= 2 * math.pi
-        while angle < -math.pi:
-            angle += 2 * math.pi
-        return angle
-    
     def set_velocity(self, velocity: Velocity):
         if self.parameters.object_type == ObjectType.STATIC:
             raise ValueError("Cannot set velocity on static object")
@@ -325,11 +486,6 @@ class SimulationObject:
         velocity_changed = not np.allclose(self.velocity.data, velocity.data)
         self.velocity = velocity
         self._running = True
-        
-        # If velocity changed from zero to non-zero, ensure motion process is active
-        if velocity_changed and np.any(velocity.data != 0.0):
-            # Motion process will handle the change automatically through _has_motion()
-            pass
     
     def stop(self):
         self.velocity = Velocity.zero()
@@ -441,3 +597,127 @@ class SimulationObject:
     
     def is_connected_to(self, other_object: 'SimulationObject') -> bool:
         return other_object in self.connected_objects
+    
+    # Navigation functionality - pluggable system
+    def set_navigation_controller(self, navigation_controller):
+        """Set a navigation controller for autonomous navigation
+        
+        Args:
+            navigation_controller: Instance of Navigation class
+        """
+        self._navigation_controller = navigation_controller
+        if navigation_controller:
+            # Connect the navigation controller to this object
+            navigation_controller.connect_object(
+                get_pose_callback=self.get_pose,
+                set_velocity_callback=self.set_velocity
+            )
+    
+    def start_navigation_process(self, targets: Optional[List[Pose]] = None) -> bool:
+        """Start autonomous navigation process with list of waypoints
+        
+        Args:
+            targets: List of Pose objects to visit in order
+        
+        Returns:
+            True if navigation started, False if no navigation controller or already running
+        """
+        if not self._navigation_controller:
+            from core.logger import get_logger, log_error
+            logger = get_logger(__name__)
+            log_error(logger, f"SimulationObject '{self.parameters.name}': No navigation controller configured")
+            return False
+            
+        if targets:
+            return self._navigation_controller.start_navigation(targets)
+        return False
+    
+    def stop_navigation_process(self):
+        """Stop autonomous navigation process"""
+        if self._navigation_controller:
+            self._navigation_controller.stop_navigation()
+    
+    def get_navigation_status(self) -> Optional[dict]:
+        """Get current navigation status"""
+        if self._navigation_controller:
+            return self._navigation_controller.get_status()
+        return None
+    
+    # Sensor functionality - pluggable system
+    def initialize_sensor_manager(self):
+        """Initialize sensor manager"""
+        if self._sensor_manager is None:
+            from .sensors import SensorManager
+            self._sensor_manager = SensorManager(self.env)
+            
+    def add_sensor(self, sensor) -> bool:
+        """
+        Add sensor
+        
+        Args:
+            sensor: Sensor instance inheriting from SensorBase
+            
+        Returns:
+            Success flag
+        """
+        self.initialize_sensor_manager()
+        return self._sensor_manager.add_sensor(sensor)
+    
+    def remove_sensor(self, sensor_name: str) -> bool:
+        """
+        Remove sensor
+        
+        Args:
+            sensor_name: Name of sensor to remove
+            
+        Returns:
+            Success flag
+        """
+        if self._sensor_manager:
+            return self._sensor_manager.remove_sensor(sensor_name)
+        return False
+    
+    def get_sensor(self, name: str):
+        """Get sensor by name"""
+        if self._sensor_manager:
+            return self._sensor_manager.get_sensor_by_name(name)
+        return None
+    
+    def get_sensors_by_type(self, sensor_type: str) -> List:
+        """Get sensors by type"""
+        if self._sensor_manager:
+            return self._sensor_manager.get_sensors_by_type(sensor_type)
+        return []
+    
+    def get_latest_sensor_data(self, sensor_name: str):
+        """Get latest sensor data"""
+        if self._sensor_manager:
+            return self._sensor_manager.get_latest_data(sensor_name)
+        return None
+    
+    def get_sensor_data_history(self, sensor_name: str, count: int = None) -> List:
+        """Get sensor data history"""
+        if self._sensor_manager:
+            return self._sensor_manager.get_data_history(sensor_name, count)
+        return []
+    
+    def add_sensor_data_callback(self, callback):
+        """Add sensor data callback"""
+        self.initialize_sensor_manager()
+        self._sensor_manager.add_data_callback(callback)
+    
+    def get_sensor_manager_status(self) -> Optional[dict]:
+        """Get sensor manager status"""
+        if self._sensor_manager:
+            return self._sensor_manager.get_status()
+        return None
+    
+    def enable_all_sensors(self):
+        """Enable all sensors"""
+        if self._sensor_manager:
+            self._sensor_manager.enable_all_sensors()
+    
+    def disable_all_sensors(self):
+        """Disable all sensors"""
+        if self._sensor_manager:
+            self._sensor_manager.disable_all_sensors()
