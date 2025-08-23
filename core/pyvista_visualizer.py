@@ -145,10 +145,10 @@ class PyVistaVisualizer:
             )
             print("⚡ PyVista non-blocking mode enabled for real-time simulation")
             print("🖱️  Interactive camera controls enabled:")
-            print("     左クリック+ドラッグ: 回転")
-            print("     右クリック+ドラッグ: ズーム")
-            print("     中クリック+ドラッグ: パン")
-            print("     マウスホイール: ズームイン/アウト")
+            print("     Left Click+Drag: Rotate")
+            print("     Right Click+Drag: Zoom")
+            print("     Middle Click+Drag: Pan")
+            print("     Mouse Wheel: Zoom In/Out")
         except Exception as e:
             print(f"⚠️ Could not enable non-blocking mode: {e}")
     

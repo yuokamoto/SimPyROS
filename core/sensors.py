@@ -407,7 +407,7 @@ class SensorManager:
         self.sensors[sensor.name] = sensor
         self.sensor_data_history[sensor.name] = []
         
-        # データコールバック設定
+        # Set data callback
         sensor.set_data_callback(self._on_sensor_data)
         
         log_info(self.logger, f"Added sensor '{sensor.name}' ({sensor.get_sensor_type()})")
@@ -445,17 +445,17 @@ class SensorManager:
         for sensor in self.sensors.values():
             sensor_data = sensor.update(current_time, object_pose, object_velocity)
             if sensor_data:
-                # データ履歴に追加
+                # Add to data history
                 history = self.sensor_data_history[sensor.name]
                 history.append(sensor_data)
                 
-                # 履歴長制限
+                # Limit history length
                 if len(history) > self.max_history_length:
                     history.pop(0)
     
     def _on_sensor_data(self, sensor_data: SensorData):
         """Callback when sensor data is received"""
-        # 全ての登録されたコールバックに通知
+        # Notify all registered callbacks
         for callback in self.data_callbacks:
             try:
                 callback(sensor_data)

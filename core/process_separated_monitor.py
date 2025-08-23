@@ -24,10 +24,18 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         
         print(f"🚀 Starting process-separated monitor (PID: {os.getpid()})")
         
+        # Global shutdown flag for clean termination
+        shutdown_requested = False
+        
         # Install signal handlers for proper Ctrl-C handling in child process
         def signal_handler(signum, frame):
-            print(f"📡 Monitor process received signal {signum}")
-            raise KeyboardInterrupt(f"Signal {signum} received")
+            nonlocal shutdown_requested
+            print(f"📡 Monitor process received signal {signum} - initiating graceful shutdown")
+            shutdown_requested = True
+            try:
+                root.quit()  # Exit the main loop gracefully
+            except Exception:
+                pass  # Window might already be destroyed
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -72,6 +80,10 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         
         def update_display():
             """Update display with data from file"""
+            # Check if shutdown was requested
+            if shutdown_requested:
+                return  # Don't schedule further updates
+                
             try:
                 if os.path.exists(data_file):
                     with open(data_file, 'r') as f:
@@ -107,17 +119,30 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
                     status_label.config(text="Status: No data", fg='orange')
                 
             except Exception as e:
-                status_label.config(text=f"Status: Error - {e}", fg='red')
+                if not shutdown_requested:  # Only report errors if not shutting down
+                    status_label.config(text=f"Status: Error - {e}", fg='red')
             
-            # Schedule next update
-            root.after(500, update_display)
+            # Schedule next update only if not shutting down
+            if not shutdown_requested:
+                try:
+                    root.after(500, update_display)
+                except Exception:
+                    pass  # Window might be destroyed
         
         # Handle close
         def on_closing():
             """Handle window close"""
+            nonlocal shutdown_requested
             print("🔴 Process monitor window closed")
-            root.quit()
-            root.destroy()
+            shutdown_requested = True
+            try:
+                root.quit()
+            except Exception:
+                pass
+            try:
+                root.destroy()
+            except Exception:
+                pass
             
         root.protocol("WM_DELETE_WINDOW", on_closing)
         
@@ -126,21 +151,28 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         
         print("✅ Process-separated monitor window ready")
         
-        # Run mainloop
+        # Run mainloop with improved error handling
         try:
             root.mainloop()
         except KeyboardInterrupt:
-            print("⌨️ Monitor interrupted by signal")
+            print("⌨️ Monitor interrupted by signal - shutting down gracefully")
         except Exception as e:
-            print(f"❌ Monitor process error: {e}")
+            if not shutdown_requested:  # Only report unexpected errors
+                print(f"❌ Monitor process error: {e}")
         finally:
             # Ensure clean shutdown
+            shutdown_requested = True
             try:
-                root.quit()
-                root.destroy()
-            except:
+                if root.winfo_exists():  # Check if window still exists
+                    root.quit()
+            except Exception:
                 pass
-            print("🛑 Process-separated monitor exiting")
+            try:
+                if root.winfo_exists():  # Check if window still exists
+                    root.destroy()
+            except Exception:
+                pass
+            print("🛑 Process-separated monitor exiting gracefully")
             
     except Exception as e:
         print(f"❌ Process monitor error: {e}")
@@ -208,13 +240,43 @@ class ProcessSeparatedMonitor:
         self.process = None
         
     def update_data(self, data: Dict[str, Any]):
-        """Update monitor data"""
+        """Update monitor data (with change detection to reduce file I/O)"""
         if not self.running:
             return
+        
+        # Skip update if data hasn't changed significantly
+        if hasattr(self, '_last_data'):
+            # Check if important values have changed
+            important_keys = ['sim_time', 'actual_rtf', 'simulation_state']
+            data_changed = False
+            for key in important_keys:
+                if key in data and key in self._last_data:
+                    if isinstance(data[key], (int, float)):
+                        # For numbers, check if change is significant (>1% for sim_time, >5% for others)
+                        threshold = 0.01 if key == 'sim_time' else 0.05
+                        if abs(data[key] - self._last_data[key]) / max(abs(self._last_data[key]), 1e-6) > threshold:
+                            data_changed = True
+                            break
+                    else:
+                        # For strings/others, check direct equality
+                        if data[key] != self._last_data[key]:
+                            data_changed = True
+                            break
+                else:
+                    data_changed = True  # New key or missing key
+                    break
+            
+            if not data_changed:
+                # print(\"📊 Monitor update skipped - no significant data changes\")  # Debug
+                return  # Skip file write if no significant changes
             
         try:
             with open(self.data_file, 'w') as f:
                 json.dump(data, f)
+            
+            # Store last data for comparison
+            self._last_data = data.copy()
+            
         except Exception as e:
             print(f"⚠️ Failed to update monitor data: {e}")
 

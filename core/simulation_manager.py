@@ -60,7 +60,7 @@ class SimulationConfig:
     
     
     # Process-separated PyVista settings
-    max_robots: int = 5  # Maximum number of robots for shared memory (デフォルト値を小さく)
+    max_robots: int = 5  # Maximum number of robots for shared memory (reduced default value)
     max_links_per_robot: int = 15  # Maximum links per robot for shared memory
     
     # Monitor window settings
@@ -266,10 +266,7 @@ class SimulationManager:
                     # Print backend-specific info
                     if backend == 'process_separated_pyvista':
                         log_debug(self.logger, "Process separation: ENABLED")
-                        log_debug(self.logger, f"Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")
-                        log_debug(self.logger, "Crash isolation: PyVista crashes don't affect simulation")
-                        log_debug(self.logger, "Non-blocking updates: SimPy performance maintained")
-                        
+                        log_debug(self.logger, f"Shared memory: {self.config.max_robots} robots, {self.config.max_links_per_robot} links/robot")                        
                         
                     elif backend == 'pyvista':
                         log_debug(self.logger, "Standard PyVista rendering")
@@ -1155,8 +1152,8 @@ class SimulationManager:
         """Add simulation object to appropriate frequency group based on its update rate"""
         
         # Get object's update frequency
-        update_interval = getattr(obj, 'update_interval', 1.0)  # Default 1s interval
-        frequency = 1.0 / update_interval  # Convert interval to frequency
+        update_rate = getattr(obj, 'update_rate', 1.0)  # Default 1.0 Hz
+        frequency = update_rate  # Already in Hz format
         
         if frequency not in self.frequency_groups:
             self.frequency_groups[frequency] = {
@@ -1432,14 +1429,25 @@ class SimulationManager:
             log_info(self.logger, "Monitor control: Reset requested")
     
     def _update_monitor_data(self):
-        """Update monitor window with current simulation data"""
+        """Update monitor window with current simulation data (with frequency throttling)"""
         if not self.monitor:
             return
         
         # Check if monitor is still running
         if hasattr(self.monitor, 'running') and not self.monitor.running:
             return
-            
+        
+        # Throttle monitor updates to reduce unnecessary file writes
+        # Update monitor only every 0.5 seconds (matching monitor read frequency)
+        current_time = time.time()
+        if not hasattr(self, '_last_monitor_update_time'):
+            self._last_monitor_update_time = 0.0
+        
+        time_since_last_update = current_time - self._last_monitor_update_time
+        if time_since_last_update < 0.5:  # Skip update if less than 500ms have passed
+            return  # Throttled: skip monitor update to reduce file I/O
+        
+        self._last_monitor_update_time = current_time
         
         try:
             # Get timing stats
