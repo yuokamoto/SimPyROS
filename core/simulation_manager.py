@@ -51,13 +51,9 @@ class SimulationConfig:
     window_size: tuple = (1200, 800)
     auto_setup_scene: bool = True
     real_time_factor: float = 1.0  # Real time multiplier (1.0 = real time, 0.5 = half speed, 2.0 = double speed, 0.0 = max speed)
-    time_step: float = 0.01  # Simulation time step in seconds
+    time_step: float = 0.1  # Simulation time step in seconds
     enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_frequency
-    
-    # SimulationManager-specific timing parameters
-    callback_frequency: float = 10.0    # Control callback frequency (Hz)
-    process_check_interval: float = 0.01 # Process check interval (seconds)
-    
+        
     # Visualization backend settings
     visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'process_separated_pyvista'
     # Removed deprecated use_optimized_visualizer option - use visualization_backend instead
@@ -72,6 +68,7 @@ class SimulationConfig:
     # Monitor window settings
     enable_monitor: bool = True  # Enable simulation monitor window (with improved X11 error handling)
     monitor_enable_controls: bool = False  # Enable control buttons in monitor
+    monitor_update_frequency: float = 1.0  # Monitor update frequency (Hz) - 1Hz = 1 second interval
     
     
 class ControlCallback:
@@ -460,7 +457,7 @@ class SimulationManager:
     
     def _control_callback_process_loop(self):
         """Independent process for user control callbacks"""
-        callback_dt = 1.0 / self.config.callback_frequency
+        callback_dt = self.config.time_step  # Use time step as callback interval
         
         while self._running and not self._shutdown_requested:
             # Check if simulation is paused
@@ -511,12 +508,20 @@ class SimulationManager:
                         self.visualizer.update_simulation_object(object_name, obj)
                 except Exception as e:
                     log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
-            
-            # Update monitor window with current data
+                        
+            # Yield control back to SimPy
+            yield self.env.timeout(dt)
+    
+    def _monitor_update_process_loop(self):
+        """Independent process for monitor data updates"""
+        monitor_update_dt = 1.0 / self.config.monitor_update_frequency  # Convert frequency to time interval
+        
+        while self._running and not self._shutdown_requested:
+            # Update monitor data if monitor is available
             self._update_monitor_data()
             
             # Yield control back to SimPy
-            yield self.env.timeout(dt)
+            yield self.env.timeout(monitor_update_dt)
     
     def _duration_monitor(self, duration: float):
         """Monitor simulation duration and close visualization when time expires"""
@@ -578,6 +583,10 @@ class SimulationManager:
         
         # Initialize monitor window
         self._initialize_monitor()
+        
+        # Start monitor update process
+        if self.monitor:
+            self._monitor_process = self.env.process(self._monitor_update_process_loop())
         
         # Start visualization process
         if self.config.visualization and self.visualizer and self.visualizer.available:
@@ -1371,25 +1380,13 @@ class SimulationManager:
             log_info(self.logger, "Monitor control: Reset requested")
     
     def _update_monitor_data(self):
-        """Update monitor window with current simulation data (with frequency throttling)"""
+        """Update monitor window with current simulation data"""
         if not self.monitor:
             return
         
         # Check if monitor is still running
         if hasattr(self.monitor, 'running') and not self.monitor.running:
             return
-        
-        # Throttle monitor updates to reduce unnecessary file writes
-        # Update monitor only every 0.5 seconds (matching monitor read frequency)
-        current_time = time.time()
-        if not hasattr(self, '_last_monitor_update_time'):
-            self._last_monitor_update_time = 0.0
-        
-        time_since_last_update = current_time - self._last_monitor_update_time
-        if time_since_last_update < 0.5:  # Skip update if less than 500ms have passed
-            return  # Throttled: skip monitor update to reduce file I/O
-        
-        self._last_monitor_update_time = current_time
         
         try:
             # Get timing stats

@@ -14,6 +14,7 @@ import json
 import tempfile
 from typing import Dict, Any, Optional
 from core.multiprocessing_cleanup import register_multiprocessing_process
+from core.simulation_monitor import BaseMonitor
 
 
 def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
@@ -54,29 +55,32 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         main_frame = tk.Frame(root, bg='white')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create labels for data fields
+        # Create labels for data fields (simplified version of BaseMonitor logic)
         fields = [
-            ("Simulation Time", "sim_time", "0.0s"),
-            ("Target RTF", "target_rtf", "1.0x"),
-            ("Actual RTF", "actual_rtf", "N/A"),
-            ("Time Step", "time_step", "0.0ms"),
-            ("Active Robots", "robots", "0"),
-            ("Active Objects", "objects", "0"),
-            ("Update Rate", "fps", "0.0 Hz"),
-            ("Timing Accuracy", "timing_accuracy", "N/A"),
+            ("Simulation Time", "sim_time", "s"),
+            ("Real Time", "real_time", "s"), 
+            ("Target RT Factor", "target_rt_factor", "x"),
+            ("Actual RT Factor", "actual_rt_factor", "x"),
+            ("Timing Accuracy", "timing_accuracy", "%"),
+            ("Update Rate", "update_frequency", "Hz"),
+            ("Time Step", "time_step", "s"),
+            ("Visualization", "visualization", ""),
+            ("Active Robots", "active_robots", ""),
+            ("Active Objects", "active_objects", ""),
+            ("Architecture", "architecture", "")
         ]
         
-        for i, (display_name, key, default) in enumerate(fields):
-            tk.Label(main_frame, text=f"{display_name}:", bg='white', fg='black').grid(
-                row=i, column=0, sticky=tk.W, pady=2
-            )
-            labels[key] = tk.Label(main_frame, text=default, bg='white', fg='blue')
-            labels[key].grid(row=i, column=1, sticky=tk.W, padx=(10, 0), pady=2)
-        
+        labels = {}
+        for i, (display_name, field_key, unit) in enumerate(fields):
+            label = tk.Label(main_frame, text=f"{display_name}: --", 
+                            bg='white', fg='black')
+            label.grid(row=i+1, column=0, sticky=tk.W, pady=2)
+            labels[field_key] = label
+            
         # Status label
         status_label = tk.Label(main_frame, text="Status: Waiting for data...", 
                                bg='white', fg='black')
-        status_label.grid(row=len(fields), column=0, sticky=tk.W, pady=10)
+        status_label.grid(row=len(fields)+2, column=0, sticky=tk.W, pady=10)
         
         def update_display():
             """Update display with data from file"""
@@ -89,30 +93,26 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
                     with open(data_file, 'r') as f:
                         data = json.load(f)
                     
-                    # Update labels with enhanced information
-                    labels['sim_time'].config(text=f"{data.get('sim_time', 0.0):.1f}s")
-                    labels['target_rtf'].config(text=f"{data.get('target_rtf', 1.0):.1f}x")
-                    labels['actual_rtf'].config(text=f"{data.get('actual_rtf', 'N/A')}")
-                    labels['time_step'].config(text=f"{data.get('time_step', 0.0):.1f}ms")
-                    labels['robots'].config(text=str(data.get('robots', 0)))
-                    labels['objects'].config(text=str(data.get('objects', 0)))
-                    labels['fps'].config(text=f"{data.get('fps', 0.0):.1f} Hz")
-                    
-                    # Color-coded timing accuracy
-                    accuracy = data.get('timing_accuracy', 'N/A')
-                    labels['timing_accuracy'].config(text=accuracy)
-                    
-                    # Set color based on accuracy
-                    if isinstance(accuracy, str) and 'EXCELLENT' in accuracy:
-                        labels['timing_accuracy'].config(fg='green')
-                    elif isinstance(accuracy, str) and 'GOOD' in accuracy:
-                        labels['timing_accuracy'].config(fg='blue')
-                    elif isinstance(accuracy, str) and 'FAIR' in accuracy:
-                        labels['timing_accuracy'].config(fg='orange')
-                    elif isinstance(accuracy, str) and 'POOR' in accuracy:
-                        labels['timing_accuracy'].config(fg='red')
-                    else:
-                        labels['timing_accuracy'].config(fg='black')
+                    # Update labels with data (simplified version of BaseMonitor logic)
+                    for field_key, label in labels.items():
+                        value = data.get(field_key, "N/A")
+                        
+                        # Format different data types appropriately
+                        if field_key == "sim_time" and isinstance(value, (int, float)):
+                            text = f"Simulation Time: {value:.1f}s"
+                        elif field_key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
+                            text = f"{field_key.replace('_', ' ').title()}: {value:.2f}x"
+                        elif field_key == "timing_accuracy" and isinstance(value, (int, float)):
+                            text = f"Timing Accuracy: {value:.1f}%"
+                        elif field_key == "update_frequency" and isinstance(value, (int, float)):
+                            text = f"Update Rate: {value:.1f} Hz"
+                        elif field_key == "time_step" and isinstance(value, (int, float)):
+                            text = f"Time Step: {value:.3f}s"
+                        else:
+                            display_name = field_key.replace('_', ' ').title()
+                            text = f"{display_name}: {value}"
+                        
+                        label.config(text=text)
                     
                     status_label.config(text="Status: Active", fg='green')
                 else:
@@ -180,14 +180,13 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         traceback.print_exc()
 
 
-class ProcessSeparatedMonitor:
-    """Process-separated simulation monitor"""
+class ProcessSeparatedMonitor(BaseMonitor):
+    """Process-separated simulation monitor using multiprocessing"""
     
     def __init__(self, title="SimPyROS Process Monitor"):
-        self.title = title
+        super().__init__(title)
         self.process = None
         self.data_file = os.path.join(tempfile.gettempdir(), "simpyros_process_monitor_data.json")
-        self.running = False
         
     def start(self, enable_controls=False, control_callback=None):
         """Start the monitor process"""
@@ -247,7 +246,7 @@ class ProcessSeparatedMonitor:
         # Skip update if data hasn't changed significantly
         if hasattr(self, '_last_data'):
             # Check if important values have changed
-            important_keys = ['sim_time', 'actual_rtf', 'simulation_state']
+            important_keys = ['sim_time', 'actual_rt_factor', 'simulation_state']
             data_changed = False
             for key in important_keys:
                 if key in data and key in self._last_data:
