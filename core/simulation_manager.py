@@ -149,6 +149,7 @@ class SimulationManager:
         # SimPy processes - simplified architecture
         self._visualization_process = None
         self._control_callback_process = None
+        self._monitor_process = None
         
         # Performance tracking
         self._start_time = 0.0
@@ -979,6 +980,12 @@ class SimulationManager:
                 self._visualization_process.interrupt()
             except Exception:
                 pass
+                
+        if self._monitor_process:
+            try:
+                self._monitor_process.interrupt()
+            except Exception:
+                pass
         
         # Log performance statistics
         if self._start_time > 0:
@@ -1402,17 +1409,19 @@ class SimulationManager:
                     error_percent = 'N/A'
                     timing_accuracy = 'N/A'
                         
-            # Prepare enhanced monitor data
+            # Prepare enhanced monitor data (field names match BaseMonitor expectations)
             monitor_data = {
                 'sim_time': timing_stats.sim_time if timing_stats else 0.0,
-                'target_rtf': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
-                'actual_rtf': f"{actual_factor:.2f}x" if actual_factor > 0 else "N/A",
-                'time_step': (self.config.time_step * 1000),  # Convert to milliseconds
-                'fps': 1.0 / self.config.time_step,
-                'visualization': self.config.visualization_backend if self.config.visualization else 'headless',
-                'robots': len(self.robots),
-                'objects': len(self.objects),
-                'architecture': 'Event-Driven SimPy',
+                'real_time': timing_stats.real_time if timing_stats else 0.0,
+                'target_rt_factor': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
+                'actual_rt_factor': actual_factor if actual_factor > 0 else 0.0,
+                'timing_accuracy': timing_accuracy,
+                'update_frequency': 1.0 / self.config.time_step,
+                'time_step': self.config.time_step,  # Keep in seconds for display
+                'visualization': self.config.visualization_backend if self.config.visualization else 'Disabled',
+                'active_robots': len(self.robots),
+                'active_objects': len(self.objects),
+                'architecture': 'Unified Process' if not self.config.enable_frequency_grouping else 'Frequency Grouped',
                 'simulation_state': 'paused' if self._simulation_paused else 'running'
             }
             

@@ -102,6 +102,8 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
                             text = f"Simulation Time: {value:.1f}s"
                         elif field_key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
                             text = f"{field_key.replace('_', ' ').title()}: {value:.2f}x"
+                        elif field_key == "real_time" and isinstance(value, (int, float)):
+                            text = f"Real Time: {value:.1f}s"
                         elif field_key == "timing_accuracy" and isinstance(value, (int, float)):
                             text = f"Timing Accuracy: {value:.1f}%"
                         elif field_key == "update_frequency" and isinstance(value, (int, float)):
