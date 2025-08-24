@@ -55,32 +55,17 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         main_frame = tk.Frame(root, bg='white')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create labels for data fields (simplified version of BaseMonitor logic)
-        # Basic fields (always shown)
-        fields = [
-            ("Simulation Time", "sim_time", "s"),
-            ("Real Time", "real_time", "s"), 
-            ("Target RT Factor", "target_rt_factor", "x"),
-            ("Actual RT Factor", "actual_rt_factor", "x"),
-            ("Time Step", "time_step", "s"),
-            ("Active Robots", "active_robots", ""),
-            ("Active Objects", "active_objects", ""),
-        ]
+        # Use BaseMonitor class methods for UI creation
+        from core.simulation_monitor import BaseMonitor
         
-        # Debug fields (only shown if enabled - default off for process-separated)
-        # Note: Debug info disabled by default in process-separated monitor
+        labels_dict, buttons_dict, status_label = BaseMonitor.create_monitor_ui(
+            parent_frame=main_frame,
+            show_debug_info=False,  # Debug info disabled by default
+            enable_controls=False   # Controls not supported in process-separated
+        )
         
-        labels = {}
-        for i, (display_name, field_key, unit) in enumerate(fields):
-            label = tk.Label(main_frame, text=f"{display_name}: --", 
-                            bg='white', fg='black')
-            label.grid(row=i+1, column=0, sticky=tk.W, pady=2)
-            labels[field_key] = label
-            
-        # Status label
-        status_label = tk.Label(main_frame, text="Status: Waiting for data...", 
-                               bg='white', fg='black')
-        status_label.grid(row=len(fields)+2, column=0, sticky=tk.W, pady=10)
+        # Convert labels_dict to simple format for compatibility
+        labels = {key: label_tuple[0] for key, label_tuple in labels_dict.items()}
         
         def update_display():
             """Update display with data from file"""
@@ -88,37 +73,16 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
             if shutdown_requested:
                 return  # Don't schedule further updates
                 
-            try:
-                if os.path.exists(data_file):
-                    with open(data_file, 'r') as f:
-                        data = json.load(f)
-                    
-                    # Update labels with data (simplified version of BaseMonitor logic)
-                    for field_key, label in labels.items():
-                        value = data.get(field_key, "N/A")
-                        
-                        # Format different data types appropriately
-                        if field_key == "sim_time" and isinstance(value, (int, float)):
-                            text = f"Simulation Time: {value:.1f}s"
-                        elif field_key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
-                            text = f"{field_key.replace('_', ' ').title()}: {value:.2f}x"
-                        elif field_key == "real_time" and isinstance(value, (int, float)):
-                            text = f"Real Time: {value:.1f}s"
-                        elif field_key == "time_step" and isinstance(value, (int, float)):
-                            text = f"Time Step: {value:.3f}s"
-                        else:
-                            display_name = field_key.replace('_', ' ').title()
-                            text = f"{display_name}: {value}"
-                        
-                        label.config(text=text)
-                    
-                    status_label.config(text="Status: Active", fg='green')
-                else:
-                    status_label.config(text="Status: No data", fg='orange')
-                
-            except Exception as e:
-                if not shutdown_requested:  # Only report errors if not shutting down
-                    status_label.config(text=f"Status: Error - {e}", fg='red')
+            # Use BaseMonitor class method for data reading and processing
+            data, status_message, status_color = BaseMonitor.read_monitor_data(data_file)
+            
+            if data is not None:
+                # Update labels using BaseMonitor class method
+                BaseMonitor.update_labels_simple(labels, data)
+            
+            # Update status label
+            if not shutdown_requested:  # Only update status if not shutting down
+                status_label.config(text=status_message, fg=status_color)
             
             # Schedule next update only if not shutting down
             if not shutdown_requested:
@@ -236,47 +200,6 @@ class ProcessSeparatedMonitor(BaseMonitor):
             print(f"⚠️ Failed to clean up data file: {e}")
             
         self.process = None
-        
-    def update_data(self, data: Dict[str, Any]):
-        """Update monitor data (with change detection to reduce file I/O)"""
-        if not self.running:
-            return
-        
-        # Skip update if data hasn't changed significantly
-        if hasattr(self, '_last_data'):
-            # Check if important values have changed
-            important_keys = ['sim_time', 'actual_rt_factor', 'simulation_state']
-            data_changed = False
-            for key in important_keys:
-                if key in data and key in self._last_data:
-                    if isinstance(data[key], (int, float)):
-                        # For numbers, check if change is significant (>1% for sim_time, >5% for others)
-                        threshold = 0.01 if key == 'sim_time' else 0.05
-                        if abs(data[key] - self._last_data[key]) / max(abs(self._last_data[key]), 1e-6) > threshold:
-                            data_changed = True
-                            break
-                    else:
-                        # For strings/others, check direct equality
-                        if data[key] != self._last_data[key]:
-                            data_changed = True
-                            break
-                else:
-                    data_changed = True  # New key or missing key
-                    break
-            
-            if not data_changed:
-                # print(\"📊 Monitor update skipped - no significant data changes\")  # Debug
-                return  # Skip file write if no significant changes
-            
-        try:
-            with open(self.data_file, 'w') as f:
-                json.dump(data, f)
-            
-            # Store last data for comparison
-            self._last_data = data.copy()
-            
-        except Exception as e:
-            print(f"⚠️ Failed to update monitor data: {e}")
 
 
 def create_process_separated_monitor(title="SimPyROS Process Monitor"):

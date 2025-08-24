@@ -60,25 +60,34 @@ class BaseMonitor(ABC):
         self.x11_error_count = 0
         self.max_x11_errors = 3
     
-    @abstractmethod
-    def start(self, enable_controls=False, control_callback=None):
-        """Start the monitor - must be implemented by subclasses"""
-        pass
-    
-    @abstractmethod
-    def stop(self):
-        """Stop the monitor - must be implemented by subclasses"""
-        pass
-    
-    def _create_ui_elements(self, parent_frame):
-        """Create common UI elements - shared between implementations"""
-        # Title - ultra-minimal tk.Label to avoid X11 RENDER issues
+    @classmethod
+    def create_monitor_ui(cls, parent_frame: tk.Frame, 
+                         show_debug_info: bool = False,
+                         enable_controls: bool = False,
+                         control_callback: Optional[Callable] = None) -> tuple:
+        """Create shared monitor UI elements (class method version)
+        
+        Args:
+            parent_frame: Parent tkinter frame to add elements to
+            show_debug_info: Whether to show debug fields (Architecture, Visualization)
+            enable_controls: Whether to add control buttons (Play/Pause/Reset)
+            control_callback: Callback function for control buttons
+            
+        Returns:
+            Tuple of (labels_dict, buttons_dict, status_label):
+            - labels_dict: Dictionary mapping field_key to (label, display_name, unit)
+            - buttons_dict: Dictionary of control buttons
+            - status_label: Status label widget
+        """
+        
+        # Title label
         title_label = tk.Label(parent_frame, text="SimPyROS Monitor", 
                               bg='white', fg='black')
         title_label.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
         
         # Create labels for different data fields
-        self.labels = {}
+        labels_dict = {}
+        
         # Basic fields (always shown)
         fields = [
             ("Simulation Time", "sim_time", "s"),
@@ -91,45 +100,65 @@ class BaseMonitor(ABC):
         ]
         
         # Debug fields (only shown if enabled)
-        if self.show_debug_info:
+        if show_debug_info:
             fields.extend([
                 ("Visualization", "visualization", ""),
                 ("Architecture", "architecture", "")
             ])
         
         for i, (display_name, field_key, unit) in enumerate(fields):
-            # Ultra-minimal tk.Label to avoid X11 RENDER issues
             label = tk.Label(parent_frame, text=f"{display_name}: --", 
                             bg='white', fg='black')
             label.grid(row=i+1, column=0, sticky=tk.W, pady=2)
-            self.labels[field_key] = (label, display_name, unit)
+            labels_dict[field_key] = (label, display_name, unit)
             
-        # Add control buttons if enabled - using basic tk widgets
-        if self.control_enabled:
+        # Add control buttons if enabled
+        buttons_dict = {}
+        if enable_controls and control_callback:
             control_frame = tk.Frame(parent_frame, bg='white')
             control_frame.grid(row=len(fields)+2, column=0, sticky=tk.W, pady=10)
             
-            self.buttons['play_pause'] = tk.Button(control_frame, text="Play", 
-                                                   command=self._toggle_play_pause,
+            def toggle_play_pause():
+                """Toggle play/pause - assumes control_callback handles state"""
+                control_callback('toggle')
+            
+            def reset_simulation():
+                """Reset simulation"""
+                control_callback('reset')
+            
+            buttons_dict['play_pause'] = tk.Button(control_frame, text="Play", 
+                                                   command=toggle_play_pause,
                                                    bg='lightgray', fg='black')
-            self.buttons['play_pause'].pack(side=tk.LEFT, padx=(0, 5))
+            buttons_dict['play_pause'].pack(side=tk.LEFT, padx=(0, 5))
             
-            self.buttons['reset'] = tk.Button(control_frame, text="Reset",
-                                              command=self._reset_simulation,
+            buttons_dict['reset'] = tk.Button(control_frame, text="Reset",
+                                              command=reset_simulation,
                                               bg='lightgray', fg='black')
-            self.buttons['reset'].pack(side=tk.LEFT, padx=(0, 5))
-            
-        # Add status label - ultra-minimal tk.Label
-        self.status_label = tk.Label(parent_frame, text="Status: Waiting for data...", 
-                                    bg='white', fg='black')
-        self.status_label.grid(row=len(fields)+3, column=0, sticky=tk.W, pady=10)
+            buttons_dict['reset'].pack(side=tk.LEFT, padx=(0, 5))
         
-        return len(fields) + 4  # Return number of rows created
+        # Add status label
+        status_label = tk.Label(parent_frame, text="Status: Waiting for data...", 
+                               bg='white', fg='black')
+        status_label.grid(row=len(fields)+3, column=0, sticky=tk.W, pady=10)
+        
+        return labels_dict, buttons_dict, status_label
     
-    def _update_ui_with_data(self, data: Dict[str, Any]):
-        """Update UI elements with data - shared logic"""
+    @classmethod
+    def update_monitor_ui(cls, labels_dict: Dict[str, Any], 
+                         status_label: tk.Label,
+                         data: Dict[str, Any],
+                         buttons_dict: Optional[Dict[str, tk.Button]] = None) -> None:
+        """Update monitor UI elements with data (class method version)
+        
+        Args:
+            labels_dict: Dictionary mapping field_key to (label, display_name, unit)
+            status_label: Status label widget to update
+            data: Data dictionary to display
+            buttons_dict: Optional control buttons to update
+        """
         try:
-            for key, (label, display_name, unit) in self.labels.items():
+            # Update data labels
+            for key, (label, display_name, unit) in labels_dict.items():
                 value = data.get(key, "N/A")
                 
                 # Format different data types appropriately
@@ -138,27 +167,130 @@ class BaseMonitor(ABC):
                 elif key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
                     text = f"{display_name}: {value:.2f} {unit}"
                 elif key == "time_step" and isinstance(value, (int, float)):
-                    text = f"{display_name}: {value:.1f} {unit}"
+                    text = f"{display_name}: {value:.3f} {unit}"
                 else:
                     text = f"{display_name}: {value} {unit}".strip()
                 
                 label.config(text=text)
             
             # Update status
-            if hasattr(self, 'status_label'):
-                sim_state = data.get('simulation_state', 'unknown')
-                self.status_label.config(text=f"Status: {sim_state.title()}")
+            sim_state = data.get('simulation_state', 'unknown')
+            status_label.config(text=f"Status: {sim_state.title()}")
             
             # Update control button states
-            if 'play_pause' in self.buttons:
+            if buttons_dict and 'play_pause' in buttons_dict:
                 sim_state = data.get('simulation_state', 'running')
                 if sim_state == 'paused':
-                    self.buttons['play_pause'].config(text="Play")
+                    buttons_dict['play_pause'].config(text="Play")
                 else:
-                    self.buttons['play_pause'].config(text="Pause")
+                    buttons_dict['play_pause'].config(text="Pause")
         
         except Exception as e:
             print(f"⚠️ Monitor UI update error: {e}")
+    
+    @staticmethod
+    def format_field_simple(field_key: str, value: Any) -> str:
+        """Simple field formatting for process-separated monitor (static method)
+        
+        Args:
+            field_key: Field identifier
+            value: Value to format
+            
+        Returns:
+            Formatted text string
+        """
+        if field_key == "sim_time" and isinstance(value, (int, float)):
+            return f"Simulation Time: {value:.1f}s"
+        elif field_key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
+            display_name = field_key.replace('_', ' ').title()
+            return f"{display_name}: {value:.2f}x"
+        elif field_key == "real_time" and isinstance(value, (int, float)):
+            return f"Real Time: {value:.1f}s"
+        elif field_key == "time_step" and isinstance(value, (int, float)):
+            return f"Time Step: {value:.3f}s"
+        else:
+            display_name = field_key.replace('_', ' ').title()
+            return f"{display_name}: {value}"
+    
+    @classmethod
+    def read_monitor_data(cls, data_file: str) -> tuple:
+        """Read and validate monitor data from file (class method)
+        
+        Args:
+            data_file: Path to the data file
+            
+        Returns:
+            Tuple of (data_dict, status_message, status_color):
+            - data_dict: Parsed JSON data or None if error
+            - status_message: Status message for display
+            - status_color: Color for status ('green', 'orange', 'red')
+        """
+        import os
+        import json
+        
+        try:
+            if os.path.exists(data_file):
+                with open(data_file, 'r') as f:
+                    data = json.load(f)
+                return data, "Status: Active", 'green'
+            else:
+                return None, "Status: No data", 'orange'
+        except Exception as e:
+            return None, f"Status: Error - {e}", 'red'
+    
+    @classmethod 
+    def update_labels_simple(cls, labels_dict: Dict[str, Any], data: Dict[str, Any]) -> None:
+        """Update simple labels with data (for process-separated monitor)
+        
+        Args:
+            labels_dict: Dictionary mapping field_key to label widget
+            data: Data dictionary to display
+        """
+        for field_key, label in labels_dict.items():
+            value = data.get(field_key, "N/A")
+            text = cls.format_field_simple(field_key, value)
+            label.config(text=text)
+    
+    @abstractmethod
+    def start(self, enable_controls=False, control_callback=None):
+        """Start the monitor - must be implemented by subclasses"""
+        pass
+    
+    @abstractmethod
+    def stop(self):
+        """Stop the monitor - must be implemented by subclasses"""
+        pass
+    
+    def _create_ui_elements(self, parent_frame):
+        """Create common UI elements using class methods"""
+        # Use class method for UI creation
+        self.labels, self.buttons, self.status_label = self.__class__.create_monitor_ui(
+            parent_frame=parent_frame,
+            show_debug_info=self.show_debug_info,
+            enable_controls=self.control_enabled,
+            control_callback=self._handle_control_command
+        )
+        
+        # Calculate number of fields for return value
+        num_fields = len(self.labels)
+        return num_fields + 4  # Title + fields + controls + status
+    
+    def _update_ui_with_data(self, data: Dict[str, Any]):
+        """Update UI elements with data using class methods"""
+        # Use class method for UI updates
+        self.__class__.update_monitor_ui(
+            labels_dict=self.labels,
+            status_label=self.status_label,
+            data=data,
+            buttons_dict=self.buttons
+        )
+    
+    def _handle_control_command(self, command: str):
+        """Handle control commands from shared UI"""
+        if command == 'toggle':
+            self._toggle_play_pause()
+        elif command == 'reset':
+            self._reset_simulation()
     
     def _toggle_play_pause(self):
         """Toggle play/pause state"""
@@ -174,6 +306,8 @@ class BaseMonitor(ABC):
     
     def update_data(self, sim_data: Dict[str, Any]):
         """Update monitor data - must be implemented by subclasses for data delivery"""
+        if not self.running:
+            return
         try:
             with open(self.data_file, 'w') as f:
                 json.dump(sim_data, f)
@@ -187,6 +321,7 @@ class SimulationMonitor(BaseMonitor):
     def __init__(self, title="SimPyROS Monitor"):
         super().__init__(title)
         self.monitor_thread = None
+        self._stop_event = threading.Event()  # Thread-safe stop signaling
         
     def start(self, enable_controls=False, control_callback=None):
         """Start the monitor window in a separate thread
@@ -200,6 +335,7 @@ class SimulationMonitor(BaseMonitor):
             
         self.control_enabled = enable_controls
         self.control_callback = control_callback
+        self._stop_event.clear()  # Clear any previous stop signals
         self.running = True
         self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=False)
         self.monitor_thread.start()
@@ -232,14 +368,8 @@ class SimulationMonitor(BaseMonitor):
         
     def _signal_close(self):
         """Signal the monitor thread to close (thread-safe)"""
-        try:
-            # Create a signal file to communicate with monitor thread
-            signal_file = os.path.join(tempfile.gettempdir(), "simpyros_monitor_close_signal.txt")
-            with open(signal_file, 'w') as f:
-                f.write("close")
-            print("📡 Close signal sent to monitor thread")
-        except Exception as e:
-            print(f"⚠️ Failed to send close signal: {e}")
+        print("📡 Setting stop event for monitor thread")
+        self._stop_event.set()  # Thread-safe signaling
                 
     def _run_monitor(self):
         """Run the tkinter monitor window with X11 error handling"""
@@ -296,23 +426,26 @@ class SimulationMonitor(BaseMonitor):
             
             print("✅ Monitor window created successfully")
             
-            # Start the tkinter main loop with error handling
+            # Start the tkinter main loop with improved error handling
             try:
+                print("🎬 Starting tkinter mainloop...")
                 self.window.mainloop()
                 print("✅ Monitor window mainloop exited gracefully")
             except Exception as e:
                 print(f"❌ Monitor window mainloop error: {e}")
-                self.x11_error_count += 1
-                if self.x11_error_count >= self.max_x11_errors:
-                    print("❌ Too many X11 errors, disabling monitor")
-                    self.running = False
+                # Don't increment error count for normal shutdown
+                if not self._stop_event.is_set():
+                    self.x11_error_count += 1
+                    if self.x11_error_count >= self.max_x11_errors:
+                        print("❌ Too many X11 errors, disabling monitor")
             finally:
                 self.running = False
                 # Clean up window within the same thread
                 if self.window:
                     try:
-                        self.window.destroy()
-                        print("✅ Monitor window destroyed in thread")
+                        if self.window.winfo_exists():
+                            self.window.destroy()
+                            print("✅ Monitor window destroyed in thread")
                     except Exception as e:
                         print(f"⚠️ Error destroying window in thread: {e}")
                     finally:
@@ -333,43 +466,33 @@ class SimulationMonitor(BaseMonitor):
         if not self.running or not self.window:
             return
             
-        # Check for close signal
-        signal_file = os.path.join(tempfile.gettempdir(), "simpyros_monitor_close_signal.txt")
-        if os.path.exists(signal_file):
-            try:
-                os.remove(signal_file)
-                print("📡 Received close signal, shutting down monitor")
-                self.running = False
-                if self.window:
-                    self.window.quit()  # Exit mainloop from within the thread
-                return
-            except Exception as e:
-                print(f"⚠️ Error processing close signal: {e}")
+        # Check for close signal (thread-safe event)
+        if self._stop_event.is_set():
+            print("📡 Received stop event, shutting down monitor")
+            self.running = False
+            if self.window:
+                self.window.quit()  # Exit mainloop from within the thread
+            return
             
-        try:
-            # Read data from shared file
-            if os.path.exists(self.data_file):
-                with open(self.data_file, 'r') as f:
-                    data = json.load(f)
-                    
-                # Use shared UI update logic from BaseMonitor
-                self._update_ui_with_data(data)
-                
-                try:
-                    self.status_label.config(text=f"Status: Connected (Updated: {time.strftime('%H:%M:%S')})")
-                except tk.TclError:
-                    pass  # Ignore status label errors
-            else:
-                try:
-                    self.status_label.config(text="Status: No data file found")
-                except tk.TclError:
-                    pass
-                
-        except Exception as e:
+        # Use BaseMonitor class method for data reading
+        data, status_message, status_color = self.__class__.read_monitor_data(self.data_file)
+        
+        if data is not None:
+            # Use shared UI update logic from BaseMonitor
+            self._update_ui_with_data(data)
+            
+            # Enhanced status with timestamp for threaded monitor
             try:
-                self.status_label.config(text=f"Status: Error reading data - {str(e)}")
+                timestamp = time.strftime('%H:%M:%S')
+                self.status_label.config(text=f"Status: Connected (Updated: {timestamp})")
             except tk.TclError:
-                pass  # If we can't even update the status, just continue
+                pass  # Ignore status label errors
+        else:
+            # Handle error cases
+            try:
+                self.status_label.config(text=status_message)
+            except tk.TclError:
+                pass  # If we can't update the status, just continue
             
         # Schedule next update with error handling
         if self.running and self.window:
@@ -410,7 +533,7 @@ def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, c
         monitor = SimulationMonitor(title)
         monitor.show_debug_info = show_debug_info  # Set debug flag
         monitor.start(enable_controls, control_callback)
-        return monitor
+    return monitor
 
 
 # Standalone monitor launcher for testing
