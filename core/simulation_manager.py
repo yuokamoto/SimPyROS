@@ -1400,6 +1400,7 @@ class SimulationManager:
             timing_stats = self.time_manager.get_timing_stats() if self.time_manager else None
             # Calculate timing accuracy
             timing_accuracy = 0.0
+            actual_factor = 0.0  # Initialize actual_factor
             if timing_stats and timing_stats.real_time_elapsed > 0 and timing_stats.sim_time > 0:
                 actual_factor = timing_stats.sim_time / timing_stats.real_time_elapsed
                 if timing_stats.real_time_factor > 0:
@@ -1412,7 +1413,7 @@ class SimulationManager:
             # Prepare enhanced monitor data (field names match BaseMonitor expectations)
             monitor_data = {
                 'sim_time': timing_stats.sim_time if timing_stats else 0.0,
-                'real_time': timing_stats.real_time if timing_stats else 0.0,
+                'real_time': timing_stats.real_time_elapsed if timing_stats else 0.0,  # Fix: use real_time_elapsed
                 'target_rt_factor': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
                 'actual_rt_factor': actual_factor if actual_factor > 0 else 0.0,
                 'timing_accuracy': timing_accuracy,
