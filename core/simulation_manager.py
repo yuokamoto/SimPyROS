@@ -69,6 +69,7 @@ class SimulationConfig:
     enable_monitor: bool = True  # Enable simulation monitor window (with improved X11 error handling)
     monitor_enable_controls: bool = False  # Enable control buttons in monitor
     monitor_update_frequency: float = 1.0  # Monitor update frequency (Hz) - 1Hz = 1 second interval
+    monitor_show_debug_info: bool = False  # Show debug info (Architecture, Visualization) in monitor
     
     
 class ControlCallback:
@@ -202,7 +203,8 @@ class SimulationManager:
             self.monitor = create_simulation_monitor(
                 title=f"SimPyROS Monitor - {backend_name}",
                 enable_controls=self.config.monitor_enable_controls,
-                control_callback=self._handle_monitor_control if self.config.monitor_enable_controls else None
+                control_callback=self._handle_monitor_control if self.config.monitor_enable_controls else None,
+                show_debug_info=self.config.monitor_show_debug_info
             )
             
             # Give the monitor a moment to initialize
@@ -1417,14 +1419,16 @@ class SimulationManager:
                 'target_rt_factor': timing_stats.real_time_factor if timing_stats else self.config.real_time_factor,
                 'actual_rt_factor': actual_factor if actual_factor > 0 else 0.0,
                 'timing_accuracy': timing_accuracy,
-                'update_frequency': 1.0 / self.config.time_step,
                 'time_step': self.config.time_step,  # Keep in seconds for display
-                'visualization': self.config.visualization_backend if self.config.visualization else 'Disabled',
                 'active_robots': len(self.robots),
                 'active_objects': len(self.objects),
-                'architecture': 'Unified Process' if not self.config.enable_frequency_grouping else 'Frequency Grouped',
                 'simulation_state': 'paused' if self._simulation_paused else 'running'
             }
+            
+            # Add debug info only if enabled
+            if self.config.monitor_show_debug_info:
+                monitor_data['visualization'] = self.config.visualization_backend if self.config.visualization else 'Disabled'
+                monitor_data['architecture'] = 'Unified Process' if not self.config.enable_frequency_grouping else 'Frequency Grouped'
             
             # Send data to monitor with error handling
             try:

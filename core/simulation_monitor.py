@@ -53,6 +53,9 @@ class BaseMonitor(ABC):
         self.control_callback = None
         self.simulation_paused = False
         
+        # Display options
+        self.show_debug_info = False  # Show debug info (Architecture, Visualization)
+        
         # Error handling for X11 issues
         self.x11_error_count = 0
         self.max_x11_errors = 3
@@ -76,19 +79,24 @@ class BaseMonitor(ABC):
         
         # Create labels for different data fields
         self.labels = {}
+        # Basic fields (always shown)
         fields = [
             ("Simulation Time", "sim_time", "s"),
             ("Real Time", "real_time", "s"), 
             ("Target RT Factor", "target_rt_factor", "x"),
             ("Actual RT Factor", "actual_rt_factor", "x"),
             ("Timing Accuracy", "timing_accuracy", "%"),
-            ("Update Rate", "update_frequency", "Hz"),
-            ("Time Step", "time_step", "s"),
-            ("Visualization", "visualization", ""),
+            ("Time Step", "time_step", "s"),  # Remove Update Rate - TimeStep is sufficient
             ("Active Robots", "active_robots", ""),
             ("Active Objects", "active_objects", ""),
-            ("Architecture", "architecture", "")
         ]
+        
+        # Debug fields (only shown if enabled)
+        if self.show_debug_info:
+            fields.extend([
+                ("Visualization", "visualization", ""),
+                ("Architecture", "architecture", "")
+            ])
         
         for i, (display_name, field_key, unit) in enumerate(fields):
             # Ultra-minimal tk.Label to avoid X11 RENDER issues
@@ -131,8 +139,6 @@ class BaseMonitor(ABC):
                 elif key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
                     text = f"{display_name}: {value:.2f} {unit}"
                 elif key == "timing_accuracy" and isinstance(value, (int, float)):
-                    text = f"{display_name}: {value:.1f} {unit}"
-                elif key in ["update_frequency"] and isinstance(value, (int, float)):
                     text = f"{display_name}: {value:.1f} {unit}"
                 elif key == "time_step" and isinstance(value, (int, float)):
                     text = f"{display_name}: {value:.1f} {unit}"
@@ -383,13 +389,14 @@ class SimulationMonitor(BaseMonitor):
     # - update_data()
 
 
-def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, control_callback=None):
+def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, control_callback=None, show_debug_info=False):
     """Factory function to create a simulation monitor
     
     Args:
         title: Window title
         enable_controls: Enable control buttons
         control_callback: Function to call for control commands
+        show_debug_info: Show debug info (Architecture, Visualization)
         
     Returns:
         Monitor instance (process-separated for better thread safety)
@@ -398,11 +405,13 @@ def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, c
         from core.process_separated_monitor import create_process_separated_monitor
         print("📊 Using process-separated monitor for better thread safety")
         monitor = create_process_separated_monitor(title)
+        monitor.show_debug_info = show_debug_info  # Set debug flag
         monitor.start(enable_controls, control_callback)
         return monitor
     except Exception as e:
         print(f"⚠️ Process-separated monitor not available, using threaded version: {e}")
         monitor = SimulationMonitor(title)
+        monitor.show_debug_info = show_debug_info  # Set debug flag
         monitor.start(enable_controls, control_callback)
         return monitor
 

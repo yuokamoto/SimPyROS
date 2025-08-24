@@ -56,19 +56,20 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Create labels for data fields (simplified version of BaseMonitor logic)
+        # Basic fields (always shown)
         fields = [
             ("Simulation Time", "sim_time", "s"),
             ("Real Time", "real_time", "s"), 
             ("Target RT Factor", "target_rt_factor", "x"),
             ("Actual RT Factor", "actual_rt_factor", "x"),
             ("Timing Accuracy", "timing_accuracy", "%"),
-            ("Update Rate", "update_frequency", "Hz"),
-            ("Time Step", "time_step", "s"),
-            ("Visualization", "visualization", ""),
+            ("Time Step", "time_step", "s"),  # Remove Update Rate - TimeStep is sufficient
             ("Active Robots", "active_robots", ""),
             ("Active Objects", "active_objects", ""),
-            ("Architecture", "architecture", "")
         ]
+        
+        # Debug fields (only shown if enabled - default off for process-separated)
+        # Note: Debug info disabled by default in process-separated monitor
         
         labels = {}
         for i, (display_name, field_key, unit) in enumerate(fields):
@@ -106,8 +107,6 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
                             text = f"Real Time: {value:.1f}s"
                         elif field_key == "timing_accuracy" and isinstance(value, (int, float)):
                             text = f"Timing Accuracy: {value:.1f}%"
-                        elif field_key == "update_frequency" and isinstance(value, (int, float)):
-                            text = f"Update Rate: {value:.1f} Hz"
                         elif field_key == "time_step" and isinstance(value, (int, float)):
                             text = f"Time Step: {value:.3f}s"
                         else:
@@ -189,6 +188,7 @@ class ProcessSeparatedMonitor(BaseMonitor):
         super().__init__(title)
         self.process = None
         self.data_file = os.path.join(tempfile.gettempdir(), "simpyros_process_monitor_data.json")
+        self.show_debug_info = False  # Default off for process-separated monitor
         
     def start(self, enable_controls=False, control_callback=None):
         """Start the monitor process"""
