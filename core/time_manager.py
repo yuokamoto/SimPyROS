@@ -154,6 +154,7 @@ class TimeManager:
             
         log_info(self.logger, f"TimeManager: Real-time factor updated: {old_factor:.2f}x → {factor:.2f}x")
     
+    # note working
     def _enforce_speed_limit(self, actual_ratio: float):
         """
         Enforce speed limiting when actual ratio exceeds target

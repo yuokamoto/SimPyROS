@@ -168,7 +168,7 @@ class SimulationMonitor:
                 ("Target RT Factor", "target_rt_factor", "x"),
                 ("Actual RT Factor", "actual_rt_factor", "x"),
                 ("Timing Accuracy", "timing_accuracy", "%"),
-                ("Update Rate", "update_rate", "Hz"),
+                ("Update Rate", "update_frequency", "Hz"),
                 ("Time Step", "time_step", "s"),
                 ("Visualization", "visualization", ""),
                 ("Active Robots", "active_robots", ""),
@@ -275,7 +275,7 @@ class SimulationMonitor:
                                 formatted_value = f"{value:.2f}"
                             elif field_key == 'timing_accuracy':
                                 formatted_value = f"{value:.1f}"
-                            elif field_key == 'update_rate':
+                            elif field_key == 'update_frequency':
                                 formatted_value = f"{value:.1f}"
                             elif field_key == 'time_step':
                                 formatted_value = f"{value:.3f}"

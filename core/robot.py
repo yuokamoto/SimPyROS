@@ -205,14 +205,29 @@ class RobotParameters(ObjectParameters):
     """Robot-specific parameters extending ObjectParameters"""
     urdf_path: str
     use_urdf_initial_pose: bool = True
-    joint_update_rate: float = 10.0  # Hz, reasonable frequency for joint control
+    joint_update_frequency: float = 10.0  # Hz (legacy, use joint_control_frequency instead)
     unified_process: bool = True  # New: Use single unified process instead of multiple
     frequency_grouping_managed: bool = False  # If True, disable internal processes (managed by FrequencyGroup)
     
+    # Robot-specific timing parameters
+    joint_control_frequency: float = 100.0  # Joint control update rate (Hz)
+    
     def __post_init__(self):
+        # Call parent __post_init__
+        super().__post_init__()
+        
         # Ensure this is a dynamic object
         if self.object_type != ObjectType.DYNAMIC:
             self.object_type = ObjectType.DYNAMIC
+        
+        # Apply legacy joint_update_frequency if different from default
+        if self.joint_update_frequency != 10.0:
+            self.joint_control_frequency = self.joint_update_frequency
+    
+    @property
+    def joint_dt(self) -> float:
+        """Get joint control time step"""
+        return self.get_dt(self.joint_control_frequency)
 
 
 class Robot(SimulationObject):
@@ -254,7 +269,7 @@ class Robot(SimulationObject):
         
         # Process control flags
         self._processes_active = False
-        self._joint_control_frequency = self.robot_parameters.joint_update_rate
+        self._joint_control_frequency = self.robot_parameters.joint_update_frequency
         
         # Robot-specific event-driven flags
         self._has_joint_commands = False
@@ -271,10 +286,45 @@ class Robot(SimulationObject):
         # Start independent SimPy processes
         self._start_robot_processes()
     
+    def _process_joint_updates(self, joint_dt: float, force_update: bool = False) -> bool:
+        """Unified joint processing logic - shared between unified process and separate process modes
+        
+        Args:
+            joint_dt: Joint update time step
+            force_update: Force update even without commands
+            
+        Returns:
+            bool: True if any joint updates were processed
+        """
+        joint_active = False
+        
+        with self._joint_command_lock:
+            # Process joint commands if any
+            while self.joint_command_queue:
+                command = self.joint_command_queue.pop(0)
+                if command.name in self.joints:
+                    self.joints[command.name].set_command(command)
+                    joint_active = True
+            
+            # Update joints if commands processed or forced update
+            if joint_active or force_update or self._has_joint_commands:
+                for joint in self.joints.values():
+                    joint.update(joint_dt)
+                self._update_forward_kinematics()
+                joint_active = True
+                
+                # Clear joint command flag if no more commands (thread-safe for separate process)
+                if hasattr(self, '_robot_event_lock'):
+                    with self._robot_event_lock:
+                        self._has_joint_commands = len(self.joint_command_queue) > 0
+                else:
+                    self._has_joint_commands = len(self.joint_command_queue) > 0
+        
+        return joint_active
+
     def _unified_process_custom_updates(self, current_time: float, active_updates: bool) -> bool:
         """Override to add robot-specific joint control to unified process"""
-        joint_dt = 1.0 / self._joint_control_frequency
-        joint_active = False
+        joint_dt = self.parameters.joint_dt
         
         # Joint Control (event-driven + periodic)
         if (self._has_joint_commands or hasattr(self, '_last_joint_update')):
@@ -284,26 +334,14 @@ class Robot(SimulationObject):
             if (self._has_joint_commands or 
                 (current_time - self._last_joint_update) >= joint_dt):
                 
-                with self._joint_command_lock:
-                    # Process joint commands if any
-                    while self.joint_command_queue:
-                        command = self.joint_command_queue.pop(0)
-                        if command.name in self.joints:
-                            self.joints[command.name].set_command(command)
-                            joint_active = True
+                # Use unified joint processing logic
+                joint_active = self._process_joint_updates(joint_dt, force_update=(current_time - self._last_joint_update) >= joint_dt)
+                if joint_active:
+                    self._last_joint_update = current_time
                     
-                    # Update joints if commands processed or time elapsed
-                    if joint_active or (current_time - self._last_joint_update) >= joint_dt:
-                        for joint in self.joints.values():
-                            joint.update(joint_dt)
-                        self._update_forward_kinematics()
-                        self._last_joint_update = current_time
-                        joint_active = True
-                        
-                        # Clear joint command flag if no more commands
-                        self._has_joint_commands = len(self.joint_command_queue) > 0
+                return joint_active
         
-        return joint_active
+        return False
     
     def _load_urdf(self) -> bool:
         """Load robot from URDF file"""
@@ -391,32 +429,13 @@ class Robot(SimulationObject):
     
     def _joint_update_loop(self) -> Generator:
         """Independent SimPy process for joint control updates"""
-        joint_dt = 1.0 / self._joint_control_frequency
+        joint_dt = self.parameters.joint_dt
         idle_timeout = 0.1  # 10Hz when idle
         
         while self._processes_active:
             try:
-                active_updates = False
-                
-                # Joint Control (event-driven + periodic)
-                with self._joint_command_lock:
-                    # Process joint commands if any
-                    while self.joint_command_queue:
-                        command = self.joint_command_queue.pop(0)
-                        if command.name in self.joints:
-                            self.joints[command.name].set_command(command)
-                            active_updates = True
-                    
-                    # Update joints if commands processed or time elapsed
-                    if active_updates or self._has_joint_commands:
-                        for joint in self.joints.values():
-                            joint.update(joint_dt)
-                        self._update_forward_kinematics()
-                        active_updates = True
-                        
-                        # Clear joint command flag if no more commands
-                        with self._robot_event_lock:
-                            self._has_joint_commands = len(self.joint_command_queue) > 0
+                # Use unified joint processing logic
+                active_updates = self._process_joint_updates(joint_dt, force_update=self._has_joint_commands)
                 
                 # Dynamic timeout based on activity
                 if active_updates:
@@ -909,7 +928,7 @@ def create_robot_from_urdf(env: simpy.Environment,
                           urdf_path: str,
                           robot_name: str = "robot",
                           initial_pose: Optional[Pose] = None,
-                          joint_update_rate: float = 10.0,
+                          joint_update_frequency: float = 10.0,
                           time_manager: Optional[TimeManager] = None,
                           unified_process: bool = True,
                           frequency_grouping_managed: bool = False) -> Robot:
@@ -921,7 +940,7 @@ def create_robot_from_urdf(env: simpy.Environment,
         urdf_path: Path to URDF file
         robot_name: Name for the robot object
         initial_pose: Initial pose (default: origin)
-        joint_update_rate: Joint control frequency in Hz
+        joint_update_frequency: Joint control frequency in Hz
         time_manager: TimeManager instance for centralized time access
         unified_process: Use unified process architecture (default True)
         frequency_grouping_managed: If True, disable individual robot processes (managed by FrequencyGroup)
@@ -937,8 +956,8 @@ def create_robot_from_urdf(env: simpy.Environment,
         object_type=ObjectType.DYNAMIC,
         urdf_path=urdf_path,
         initial_pose=initial_pose,
-        update_rate=100.0,  # Base motion frequency in Hz
-        joint_update_rate=joint_update_rate,
+        update_frequency=100.0,  # Base motion frequency in Hz
+        joint_update_frequency=joint_update_frequency,
         unified_process=unified_process,
         frequency_grouping_managed=frequency_grouping_managed
     )
@@ -949,7 +968,7 @@ def create_robot_from_urdf(env: simpy.Environment,
 def create_robot_programmatically(env: simpy.Environment,
                                  robot_name: str = "programmatic_robot",
                                  initial_pose: Optional[Pose] = None,
-                                 joint_update_rate: float = 10.0,
+                                 joint_update_frequency: float = 10.0,
                                  time_manager: Optional[TimeManager] = None,
                                  unified_process: bool = True) -> Robot:
     """
@@ -959,7 +978,7 @@ def create_robot_programmatically(env: simpy.Environment,
         env: SimPy environment (preferably RealtimeEnvironment)
         robot_name: Name for the robot object
         initial_pose: Initial pose (default: origin)
-        joint_update_rate: Joint control frequency in Hz
+        joint_update_frequency: Joint control frequency in Hz
         time_manager: TimeManager instance for centralized time access
     
     Returns:
@@ -974,8 +993,8 @@ def create_robot_programmatically(env: simpy.Environment,
         object_type=ObjectType.DYNAMIC,
         urdf_path="",  # Empty for programmatic robots
         initial_pose=initial_pose,
-        update_rate=100.0,
-        joint_update_rate=joint_update_rate,
+        update_frequency=100.0,
+        joint_update_frequency=joint_update_frequency,
         unified_process=unified_process
     )
     
@@ -1002,7 +1021,7 @@ def create_robot_programmatically(env: simpy.Environment,
     
     # Process control
     robot._processes_active = False
-    robot._joint_control_frequency = joint_update_rate
+    robot._joint_control_frequency = joint_update_frequency
     # Process references now handled by SimulationObject
     # robot._unified_process = None  # Deprecated - now handled by parent class
     

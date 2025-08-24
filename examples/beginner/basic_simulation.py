@@ -84,7 +84,7 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_rate=30.0,  # Optimized update rate for better real-time performance
+        update_frequency=30.0,  # Optimized update frequency for better real-time performance
         enable_frequency_grouping=False,  # Disable frequency grouping to test individual processes
         enable_monitor=enable_monitor  # Control monitor window creation
     )
@@ -155,7 +155,7 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_rate=30.0,  # Optimized update rate for better real-time performance
+        update_frequency=30.0,  # Optimized update frequency for better real-time performance
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -225,7 +225,7 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_rate=30.0,  # Optimized update rate for better real-time performance
+        update_frequency=30.0,  # Optimized update frequency for better real-time performance
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
@@ -312,7 +312,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
     config = SimulationConfig(
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_rate=100.0,    # Maximum update rate for performance testing
+        update_frequency=100.0,    # Maximum update frequency for performance testing
         real_time_factor=real_time_factor,
         enable_frequency_grouping=use_frequency_grouping,  # Enabled by default for optimization
         enable_monitor=True  # Enable monitor for performance demo visibility

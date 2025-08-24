@@ -269,3 +269,25 @@ yield env.timeout(time_step)  # Only one yield in entire system
 - **sim_time based updates** ensure accurate timing regardless of real_time_factor
 - **Processing time compensation** achieves precise real-time synchronization
 - **Single loop design** scales efficiently with multiple robots and objects
+
+### Python Naming Conventions
+SimPyROS follows standard Python naming conventions for method visibility:
+
+#### **Public Methods (no underscore)**
+- `set_velocity()`, `add_sensor()`, `connect_to()`
+- These are the **public API** intended for external use
+- Safe to call from user code
+- Guaranteed interface stability
+
+#### **Internal Methods (`_method_name`)**
+- `_motion_update_loop()`, `_has_motion()`, `_update_state()`
+- These are **internal implementation** methods
+- Used only within the class for helper functionality
+- **Should not be called directly** from external code
+- May change in future versions without notice
+
+#### **Private Methods (`__method_name`)**
+- Reserved for strict encapsulation (rare usage)
+- Python applies name mangling for these methods
+
+**Developer Guideline**: Always use public API methods when integrating SimPyROS. Internal methods (with `_`) are subject to change and should be avoided in user code.

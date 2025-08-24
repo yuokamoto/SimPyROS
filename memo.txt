@@ -62,5 +62,25 @@
 
 
 12.
-- realtime factor のtargetと実測
+- performance demoは、ランダムでmobileかrobot armを生成するようにしてほしい
+- performance demoでmonitorがでない
+- performance demoでロボットの動きをランダムにしたい。すぐにカメラの外に移動してしまうので。
+- １台であってもロボットspawnに時間がかかっている。pyvistaに最適化の余地があるのでは？
+- すべてのコメントとprint/loggingを日本語から英語に。
+- すべてのINFOがターミナルに出力されると見づらい。coreは機能ごとに別々のlogにsaveするようにした。logにするかterminalに出力するか、それぞれ機能ごとに選べるとよい
+
+13. features
+- sensor mode, separate, unified 
+- hardcoded sensor update and nav update frequency
+- frequency group for navigation and sensor
+- process_separated_monitor
+- separated pyvistaでinteractiveが動作しない
+- real time factor がシミュレーション開始時にすごく大きくなる問題。小さい値から上げてったほうが良いのか？
+- _control_callback_process_loop のhardcoded frequency
+- update object visualization とrobot visualization別れている意味？
+- duration mode いらない
+- frequency group 確認
 - 
+
+15. later
+- - urdf load in simulation_object

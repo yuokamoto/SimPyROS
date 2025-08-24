@@ -9,6 +9,8 @@ import numpy as np
 import threading
 from scipy.spatial.transform import Rotation
 
+# Timing parameters moved directly to ObjectParameters
+
 
 class ObjectType(Enum):
     STATIC = "static"
@@ -192,10 +194,34 @@ class ObjectParameters:
     object_type: ObjectType
     urdf_path: Optional[str] = None
     sdf_path: Optional[str] = None
-    initial_pose: Pose = Pose()
-    update_rate: float = 10.0  # Hz
+    initial_pose: Pose = None
+    update_frequency: float = 10.0  # Hz (legacy, mainly for motion updates)
     frequency_grouping_managed: bool = False  # If True, disable individual motion process
     unified_process: bool = False  # If True, use unified event-driven process instead of separate motion process
+    
+    # Timing parameters (moved from TimingParameters class)
+    sensor_frequency: float = 10.0      # Sensor update rate (Hz)
+    navigation_frequency: float = 10.0  # Navigation update rate (Hz)
+    process_check_interval: float = 0.01 # Process status check interval (seconds)
+    
+    def __post_init__(self):
+        """Initialize default values after dataclass initialization"""
+        if self.initial_pose is None:
+            self.initial_pose = Pose()
+    
+    def get_dt(self, frequency: float) -> float:
+        """Get time step for given frequency"""
+        return 1.0 / max(frequency, 1e-6)  # Prevent division by zero
+    
+    @property
+    def sensor_dt(self) -> float:
+        """Get sensor update time step"""
+        return self.get_dt(self.sensor_frequency)
+    
+    @property 
+    def navigation_dt(self) -> float:
+        """Get navigation update time step"""
+        return self.get_dt(self.navigation_frequency)
 
 
 class SimulationObject:
@@ -267,17 +293,16 @@ class SimulationObject:
     
     def _motion_update_loop(self) -> Generator:
         """Independent SimPy process for object motion updates - Event-driven optimization"""
-        dt = 1.0 / self.parameters.update_rate
+        dt = 1.0 / self.parameters.update_frequency
         idle_timeout = 0.1  # 10Hz when idle
-        timeout = idle_timeout
         
         while self._process_active:
             try:
-                # Only update if this  has motion                
-                if self._has_motion():                
-                    self._update_state(dt)
-                    # Use normal update interval when active
-                    timeout = dt
+                # Use unified motion processing logic
+                motion_active = self._process_motion_update(dt)
+                
+                # Dynamic timeout based on activity
+                timeout = dt if motion_active else idle_timeout
                     
             except Exception as e:
                 print(f"⚠️ SimulationObject '{self.parameters.name}' motion error: {e}")
@@ -288,13 +313,13 @@ class SimulationObject:
     
     def _sensor_update_loop(self) -> Generator:
         """Independent SimPy process for sensor updates"""
-        sensor_dt = 1.0 / 20.0  # Default 20Hz for sensors
+        sensor_dt = self.parameters.sensor_dt
         
         while self._process_active:
             try:
-                if self._sensor_manager:
-                    current_time = self.time_manager.get_sim_time() if self.time_manager else self.env.now
-                    self._sensor_manager.update_all_sensors(current_time, self.pose, self.velocity)
+                # Use unified sensor processing logic
+                current_time = self.time_manager.get_sim_time() if self.time_manager else self.env.now
+                self._process_sensor_update(current_time)
                     
             except Exception as e:
                 print(f"⚠️ SimulationObject '{self.parameters.name}' sensor error: {e}")
@@ -304,15 +329,12 @@ class SimulationObject:
     
     def _navigation_update_loop(self) -> Generator:
         """Independent SimPy process for navigation updates"""
-        nav_dt = 1.0 / 10.0  # Default 10Hz for navigation
+        nav_dt = self.parameters.navigation_dt
         
         while self._process_active:
             try:
-                if self._navigation_controller and hasattr(self._navigation_controller, 'is_active'):
-                    if self._navigation_controller.is_active:
-                        # Navigation controller will handle its own updates
-                        # This loop is mainly for monitoring and cleanup
-                        pass
+                # Use unified navigation processing logic
+                self._process_navigation_update()
                     
             except Exception as e:
                 print(f"⚠️ SimulationObject '{self.parameters.name}' navigation error: {e}")
@@ -333,6 +355,50 @@ class SimulationObject:
                 return True
         
         return False
+
+    def _process_motion_update(self, dt: float, force_update: bool = False) -> bool:
+        """Unified motion processing logic - shared between unified process and separate process modes
+        
+        Args:
+            dt: Motion update time step
+            force_update: Force update even without motion detection
+            
+        Returns:
+            bool: True if motion updates were processed
+        """
+        if (force_update or 
+            (self.parameters.object_type == ObjectType.DYNAMIC and self._has_motion())):
+            self._update_state(dt)
+            return True
+        return False
+
+    def _process_sensor_update(self, current_time: float) -> bool:
+        """Unified sensor processing logic - shared between unified process and separate process modes
+        
+        Args:
+            current_time: Current simulation time
+            
+        Returns:
+            bool: True if sensor updates were processed
+        """
+        if self._sensor_manager:
+            self._sensor_manager.update_all_sensors(current_time, self.pose, self.velocity)
+            return True
+        return False
+
+    def _process_navigation_update(self) -> bool:
+        """Unified navigation processing logic - shared between unified process and separate process modes
+        
+        Returns:
+            bool: True if navigation updates were processed
+        """
+        if (self._navigation_controller and 
+            hasattr(self._navigation_controller, 'is_active') and 
+            self._navigation_controller.is_active):
+            # Navigation controller handles its own updates
+            # This is mainly for monitoring and status tracking
+            return True
+        return False
     
     def _start_unified_update_process(self):
         """Start unified process for all object subsystems"""
@@ -352,10 +418,10 @@ class SimulationObject:
         last_sensor_update = 0.0
         last_navigation_update = 0.0
         
-        motion_dt = 1.0 / self.parameters.update_rate
-        sensor_dt = 1.0 / 20.0  # 20Hz for sensors
-        navigation_dt = 1.0 / 10.0  # 10Hz for navigation
-        base_timeout = 0.1  # 10Hz base monitoring
+        motion_dt = 1.0 / self.parameters.update_frequency
+        sensor_dt = self.parameters.sensor_dt
+        navigation_dt = self.parameters.navigation_dt
+        base_timeout = self.parameters.process_check_interval
         
         while self._process_active:
             current_time = self.time_manager.get_sim_time() if self.time_manager else self.env.now
@@ -364,33 +430,24 @@ class SimulationObject:
             try:
                 # 1. Motion updates (periodic with motion detection)
                 if (current_time - last_motion_update) >= motion_dt:
-                    
-                    # Use consistent motion detection method                    
-                    if (self.parameters.object_type == ObjectType.DYNAMIC and 
-                        self._has_motion()):
-
-                        self._update_state(motion_dt)
+                    # Use unified motion processing logic
+                    if self._process_motion_update(motion_dt):
                         active_updates = True
-                    
                     last_motion_update = current_time
                 
                 # 2. Sensor updates
-                if (self._sensor_manager and 
-                    (current_time - last_sensor_update) >= sensor_dt):
-                    
-                    self._sensor_manager.update_all_sensors(current_time, self.pose, self.velocity)
+                if (current_time - last_sensor_update) >= sensor_dt:
+                    # Use unified sensor processing logic
+                    if self._process_sensor_update(current_time):
+                        active_updates = True
                     last_sensor_update = current_time
-                    active_updates = True
                 
                 # 3. Navigation updates
-                if (self._navigation_controller and 
-                    (current_time - last_navigation_update) >= navigation_dt):
-                    
-                    if hasattr(self._navigation_controller, 'is_active') and self._navigation_controller.is_active:
-                        # Navigation controller handles its own updates
-                        pass
+                if (current_time - last_navigation_update) >= navigation_dt:
+                    # Use unified navigation processing logic
+                    if self._process_navigation_update():
+                        active_updates = True
                     last_navigation_update = current_time
-                    active_updates = True
                 
                 # 4. Allow subclasses to add custom updates (e.g., joint control for robots)
                 active_updates = self._unified_process_custom_updates(current_time, active_updates) or active_updates

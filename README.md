@@ -337,6 +337,21 @@ This project emphasizes:
 - **Performance optimization** with timing accuracy
 - **Comprehensive documentation** of design decisions
 
+### 🔧 Python Naming Conventions
+
+SimPyROS follows standard Python naming conventions:
+
+- **`public_method()`** - Public API for user interaction
+  - `set_velocity()`, `add_sensor()`, `run()`
+  - Safe to use in your code, stable interface
+
+- **`_internal_method()`** - Internal implementation (single underscore)  
+  - `_motion_update_loop()`, `_has_motion()`, `_update_state()`
+  - **Avoid calling these directly** - subject to change
+  - Used for class-internal functionality
+
+When developing with SimPyROS, always use public methods without underscores for reliable, future-proof code.
+
 ## 📄 License
 
 [Add your license information here]

@@ -18,6 +18,8 @@ import signal
 import sys
 from typing import Dict, List, Optional, Callable, Any, Union
 from dataclasses import dataclass
+
+# No longer need to import TimingParameters - using direct parameters
 import warnings
 
 import simpy
@@ -43,14 +45,18 @@ from core.multiprocessing_cleanup import cleanup_multiprocessing_resources
 @dataclass
 class SimulationConfig:
     """Configuration for simulation manager"""
-    update_rate: float = 100.0  # Hz
+    update_frequency: float = 100.0  # Hz (legacy, use direct frequency parameters instead)
     visualization: bool = True
-    visualization_update_rate: float = 30.0  # Hz
+    visualization_update_frequency: float = 30.0  # Hz (legacy, use direct frequency parameters instead)
     window_size: tuple = (1200, 800)
     auto_setup_scene: bool = True
     real_time_factor: float = 1.0  # Real time multiplier (1.0 = real time, 0.5 = half speed, 2.0 = double speed, 0.0 = max speed)
     time_step: float = 0.01  # Simulation time step in seconds
-    enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_rate
+    enable_frequency_grouping: bool = True  # Auto-group robots by joint_update_frequency
+    
+    # SimulationManager-specific timing parameters
+    callback_frequency: float = 10.0    # Control callback frequency (Hz)
+    process_check_interval: float = 0.01 # Process check interval (seconds)
     
     # Visualization backend settings
     visualization_backend: str = 'process_separated_pyvista'  # 'pyvista', 'process_separated_pyvista'
@@ -202,7 +208,6 @@ class SimulationManager:
             )
             
             # Give the monitor a moment to initialize
-            import time
             time.sleep(0.1)
             
             if self.monitor and hasattr(self.monitor, 'running') and self.monitor.running:
@@ -235,7 +240,7 @@ class SimulationManager:
                     config = SharedMemoryConfig(
                         max_robots=self.config.max_robots,
                         max_links_per_robot=self.config.max_links_per_robot,
-                        update_frequency=self.config.visualization_update_rate
+                        update_frequency=self.config.visualization_update_frequency
                     )
                     self.visualizer = create_process_separated_urdf_visualizer(config=config)
                     
@@ -283,7 +288,7 @@ class SimulationManager:
                            name: str, 
                            urdf_path: str,
                            initial_pose: Optional[Pose] = None,
-                           joint_update_rate: float = 10.0,
+                           joint_update_frequency: float = 10.0,
                            unified_process: bool = True) -> Robot:
         """
         Add robot from URDF file
@@ -292,7 +297,7 @@ class SimulationManager:
             name: Unique name for the robot
             urdf_path: Path to URDF file
             initial_pose: Initial pose (defaults to origin)
-            joint_update_rate: Joint control frequency in Hz
+            joint_update_frequency: Joint control frequency in Hz
             
         Returns:
             Robot instance
@@ -318,7 +323,7 @@ class SimulationManager:
                 urdf_path,
                 name,
                 initial_pose,
-                joint_update_rate,
+                joint_update_frequency,
                 time_manager=self.time_manager,
                 unified_process=effective_unified_process,
                 frequency_grouping_managed=self._frequency_grouping_enabled
@@ -328,7 +333,7 @@ class SimulationManager:
             
             # Auto-register for frequency grouping if enabled
             if self._frequency_grouping_enabled:
-                self._add_robot_to_frequency_group(name, robot, joint_update_rate)
+                self._add_robot_to_frequency_group(name, robot, joint_update_frequency)
             
             # Add to visualization if available
             if self.config.visualization:
@@ -455,7 +460,7 @@ class SimulationManager:
     
     def _control_callback_process_loop(self):
         """Independent process for user control callbacks"""
-        callback_dt = 1.0 / 10.0  # 10 Hz for control callbacks, sufficient responsiveness
+        callback_dt = 1.0 / self.config.callback_frequency
         
         while self._running and not self._shutdown_requested:
             # Check if simulation is paused
@@ -488,7 +493,7 @@ class SimulationManager:
         if not self.visualizer or not self.visualizer.available:
             return
             
-        dt = 1.0 / self.config.visualization_update_rate
+        dt = 1.0 / self.config.visualization_update_frequency
         
         while self._running and not self._shutdown_requested:
             
@@ -502,7 +507,8 @@ class SimulationManager:
             # Update simulation object visualizations
             for object_name, obj in self.objects.items():
                 try:
-                    self._update_object_visualization(object_name, obj)
+                    if hasattr(self.visualizer, 'update_simulation_object'):
+                        self.visualizer.update_simulation_object(object_name, obj)
                 except Exception as e:
                     log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
             
@@ -512,21 +518,13 @@ class SimulationManager:
             # Yield control back to SimPy
             yield self.env.timeout(dt)
     
-    def _duration_monitor(self, duration: float, duration_mode: str = 'sim_time'):
+    def _duration_monitor(self, duration: float):
         """Monitor simulation duration and close visualization when time expires"""
-        if duration_mode == 'wall_time':
-            # Wall time mode: wait for actual elapsed time regardless of real_time_factor
-            start_time = time.time()
-            while time.time() - start_time < duration and not self._shutdown_requested:
-                # Use much smaller timeout to maintain simulation responsiveness
-                yield self.env.timeout(0.01)  # Check every 10ms in simulation time
-            log_info(self.logger, f"Wall time duration {duration}s completed - closing visualization")
-        else:
-            # Simulation time mode (default): wait for simulation time duration
-            # The RealtimeEnvironment will automatically adjust wall time based on real_time_factor
-            yield self.env.timeout(duration)
-            log_info(self.logger, f"Simulation time duration {duration}s completed - closing visualization")
-            
+        # Wait for simulation time duration
+        # The RealtimeEnvironment will automatically adjust wall time based on real_time_factor
+        yield self.env.timeout(duration)
+        log_info(self.logger, f"Simulation time duration {duration}s completed - closing visualization")
+        
         self._shutdown_requested = True
         if self.visualizer and hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
             try:
@@ -534,87 +532,14 @@ class SimulationManager:
             except:
                 pass
     
-    def _update_object_visualization(self, object_name: str, obj: SimulationObject):
-        """Update visualization for a simulation object (box, sphere, etc.)"""
-        if not self.visualizer or not hasattr(self.visualizer, 'plotter'):
-            return
-        
-        try:
-            # Check if object has an associated mesh actor
-            if hasattr(obj, '_mesh_actor') and obj._mesh_actor is not None:
-                # Update transformation matrix
-                transform_matrix = obj.pose.to_transformation_matrix()
-                
-                # Set transformation on the mesh actor
-                try:
-                    vtk_matrix = self.visualizer.pv.vtk.vtkMatrix4x4()
-                    for i in range(4):
-                        for j in range(4):
-                            vtk_matrix.SetElement(i, j, transform_matrix[i, j])
-                    obj._mesh_actor.SetUserMatrix(vtk_matrix)
-                except Exception as e:
-                    log_warning(self.logger, f"Failed to update {object_name} transformation: {e}")
-            else:
-                # Object not yet visualized, create mesh if needed
-                self._create_object_mesh(object_name, obj)
-                
-        except Exception as e:
-            log_warning(self.logger, f"Failed to update visualization for {object_name}: {e}")
     
-    def _create_object_mesh(self, object_name: str, obj: SimulationObject):
-        """Create mesh representation for simulation object"""
-        if not self.visualizer or not hasattr(self.visualizer, 'plotter'):
-            return
-        
-        try:
-            mesh = None
-            # Create mesh based on object parameters
-            if hasattr(obj.parameters, 'geometry_type'):
-                geometry_type = obj.parameters.geometry_type
-                params = getattr(obj.parameters, 'geometry_params', {})
-                
-                if geometry_type == "box":
-                    size = params.get('size', [0.3, 0.3, 0.3])
-                    mesh = self.visualizer.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
-                elif geometry_type == "cylinder":
-                    radius = params.get('radius', 0.05)
-                    height = params.get('height', 0.2)
-                    mesh = self.visualizer.pv.Cylinder(radius=radius, height=height, direction=(0, 0, 1))
-                elif geometry_type == "sphere":
-                    radius = params.get('radius', 0.1)
-                    mesh = self.visualizer.pv.Sphere(radius=radius)
-            
-            if mesh is not None:
-                # Apply current transformation
-                transform_matrix = obj.pose.to_transformation_matrix()
-                mesh.transform(transform_matrix, inplace=True)
-                
-                # Get color
-                color = getattr(obj.parameters, 'color', (0.6, 0.6, 0.6))
-                if len(color) > 3:
-                    color = color[:3]  # RGB only for PyVista
-                
-                # Add to scene and store reference
-                actor = self.visualizer.plotter.add_mesh(
-                    mesh, 
-                    color=color, 
-                    opacity=0.8, 
-                    name=f"object_{object_name}"
-                )
-                obj._mesh_actor = actor
-                log_success(self.logger, f"Created visualization for {object_name}: {geometry_type}")
-                
-        except Exception as e:
-            log_warning(self.logger, f"Failed to create mesh for {object_name}: {e}")
-    
-    def run(self, duration: Optional[float] = None, auto_close: bool = False, duration_mode: str = 'sim_time') -> bool:
+    def run(self, duration: Optional[float] = None, auto_close: bool = False) -> bool:
         """
         Run simulation until Ctrl+C, window close, or duration expires
         
         Args:
-            duration: Optional duration in seconds
+            duration: Optional duration in simulation time seconds
             auto_close: If True, automatically close visualization when duration expires
-            duration_mode: 'sim_time' (default) for simulation time, 'wall_time' for real elapsed time
             
         Returns:
             Success status
@@ -626,7 +551,7 @@ class SimulationManager:
         log_info(self.logger, "Starting simulation...")
         log_info(self.logger, f"Robots: {len(self.robots)}")
         log_info(self.logger, f"Objects: {len(self.objects)}")
-        log_info(self.logger, f"Update rate: {self.config.update_rate} Hz")
+        log_info(self.logger, f"Update frequency: {self.config.update_frequency} Hz")
         if self.config.real_time_factor == 0.0:
             log_info(self.logger, "Real time factor: MAX SPEED (0.0)")
         else:
@@ -667,14 +592,8 @@ class SimulationManager:
                 # Check if this is a process-separated visualizer
                 is_process_separated = hasattr(self.visualizer, '_run_visualization_process')
                 
-                # Set up simulation duration
-                simulation_end_time = None
-                if duration:
-                    simulation_end_time = self.env.now + duration
-                    if auto_close:
-                        log_info(self.logger, f"Simulation will run for {duration}s, then auto-close")
-                    else:
-                        log_info(self.logger, f"Simulation will run for {duration}s, but window stays open")
+                # Set up simulation duration (unified)
+                simulation_end_time = self._setup_simulation_duration(duration, auto_close)
                 
                 if not is_process_separated:
                     # Standard visualizers (PyVista with plotter)
@@ -685,23 +604,8 @@ class SimulationManager:
                             interactive_update=True
                         )
                         
-                        # Visualization loop for standard visualizers
-                        while not self._shutdown_requested:
-                            # Check if simulation time has ended
-                            if simulation_end_time and self.env.now >= simulation_end_time:
-                                self._handle_simulation_end(duration, auto_close)
-                                break
-                            else:
-                                # Run simulation step
-                                if not self._run_simulation_step(simulation_end_time):
-                                    break
-                            
-                            # Update visualization
-                            try:
-                                self.visualizer.plotter.update()
-                            except:
-                                # Window closed by user
-                                break
+                        # Run unified simulation loop with visualization updates
+                        self._run_simulation_loop(simulation_end_time, duration, auto_close, update_visualization=True)
                     
                     except Exception as e:
                         log_warning(self.logger, f"Visualization error: {e}")
@@ -712,44 +616,25 @@ class SimulationManager:
                     # Process-separated or headless mode
                     log_info(self.logger, "Running with process-separated visualization")
                     
-                    try:
-                        while not self._shutdown_requested:
-                            # Check if simulation time has ended
-                            if simulation_end_time and self.env.now >= simulation_end_time:
-                                self._handle_simulation_end(duration, auto_close)
-                                break
-                            else:
-                                # Run simulation step
-                                if not self._run_simulation_step(simulation_end_time):
-                                    break
-                                    
-                    except KeyboardInterrupt:
-                        log_info(self.logger, "\nVisualization interrupted")
-                        self._shutdown_requested = True
+                    # Run unified simulation loop without visualization updates
+                    self._run_simulation_loop(simulation_end_time, duration, auto_close, update_visualization=False)
             else:
                 # Headless mode: let RealtimeEnvironment handle timing properly
                 if duration:
                     # Start duration monitor process for headless mode
-                    duration_process = self.env.process(self._duration_monitor(duration, duration_mode))
+                    duration_process = self.env.process(self._duration_monitor(duration))
                     
-                    if duration_mode == 'wall_time':
-                        log_info(self.logger, f"Headless simulation will run for {duration}s wall time (regardless of RTF {self.config.real_time_factor}x)")
-                    else:
-                        log_info(self.logger, f"Headless simulation will run for {duration}s simulation time (RTF {self.config.real_time_factor}x → ~{duration/self.config.real_time_factor:.1f}s wall time)")
+                    log_info(self.logger, f"Headless simulation will run for {duration}s simulation time (RTF {self.config.real_time_factor}x → ~{duration/self.config.real_time_factor:.1f}s wall time)")
                     
                     # Run SimPy environment until duration expires - let RealtimeEnvironment handle timing
                     try:
-                        if duration_mode == 'wall_time':
-                            # For wall time mode, run longer to ensure duration monitor completes
-                            self.env.run(until=self.env.now + duration * self.config.real_time_factor + 1.0)
-                        else:
-                            # For sim time mode, run until duration monitor finishes
-                            self.env.run(until=self.env.now + duration + 0.1)  # Allow slight buffer
+                        # Run until duration monitor finishes
+                        self.env.run(until=self.env.now + duration + 0.1)  # Allow slight buffer
                     except simpy.core.EmptySchedule:
                         # All processes finished naturally
                         log_info(self.logger, "Headless simulation completed naturally")
                         
-                    log_info(self.logger, f"Headless simulation duration ({duration}s {duration_mode}) completed")
+                    log_info(self.logger, f"Headless simulation duration ({duration}s sim_time) completed")
                 else:
                     try:
                         # Infinite headless simulation
@@ -784,7 +669,7 @@ class SimulationManager:
     def _run_simulation_step(self, simulation_end_time: Optional[float]) -> bool:
         """Run a single simulation step, returns False if simulation should end"""
         try:
-            step_size = 1.0 / self.config.update_rate
+            step_size = 1.0 / self.config.update_frequency
             target_time = min(
                 self.env.now + step_size, 
                 simulation_end_time or self.env.now + step_size
@@ -793,6 +678,63 @@ class SimulationManager:
             return True
         except simpy.core.EmptySchedule:
             # All processes finished
+            return False
+
+    def _setup_simulation_duration(self, duration: Optional[float], auto_close: bool) -> Optional[float]:
+        """Setup simulation duration and logging
+        
+        Args:
+            duration: Optional duration in seconds
+            auto_close: Whether to auto-close on completion
+            
+        Returns:
+            Optional[float]: End time for simulation (None for infinite)
+        """
+        simulation_end_time = None
+        if duration:
+            simulation_end_time = self.env.now + duration
+            if auto_close:
+                log_info(self.logger, f"Simulation will run for {duration}s, then auto-close")
+            else:
+                log_info(self.logger, f"Simulation will run for {duration}s, but window stays open")
+        return simulation_end_time
+
+    def _run_simulation_loop(self, simulation_end_time: Optional[float], duration: Optional[float], auto_close: bool, update_visualization: bool = False) -> bool:
+        """Unified simulation loop for both standard and process-separated visualizers
+        
+        Args:
+            simulation_end_time: When to end simulation (None for infinite)
+            duration: Original duration value for logging
+            auto_close: Whether to auto-close on completion
+            update_visualization: Whether to call visualizer.plotter.update()
+            
+        Returns:
+            bool: True if loop completed successfully, False if interrupted
+        """
+        try:
+            while not self._shutdown_requested:
+                # Check if simulation time has ended
+                if simulation_end_time and self.env.now >= simulation_end_time:
+                    self._handle_simulation_end(duration, auto_close)
+                    break
+                else:
+                    # Run simulation step
+                    if not self._run_simulation_step(simulation_end_time):
+                        break
+                
+                # Update visualization if requested
+                if update_visualization:
+                    try:
+                        self.visualizer.plotter.update()
+                    except:
+                        # Window closed by user
+                        return False
+            
+            return True
+            
+        except KeyboardInterrupt:
+            log_info(self.logger, "\nVisualization interrupted")
+            self._shutdown_requested = True
             return False
     
     def set_realtime_factor(self, factor: float):
@@ -1126,7 +1068,7 @@ class SimulationManager:
         
         if robot_frequency != frequency:
             log_warning(self.logger, f"Robot '{name}' callback frequency ({frequency} Hz) differs from "
-                  f"robot joint_update_rate ({robot_frequency} Hz). Using robot frequency.")
+                  f"robot joint_update_frequency ({robot_frequency} Hz). Using robot frequency.")
             frequency = robot_frequency
         
         if frequency not in self.frequency_groups:
@@ -1152,8 +1094,8 @@ class SimulationManager:
         """Add simulation object to appropriate frequency group based on its update rate"""
         
         # Get object's update frequency
-        update_rate = getattr(obj, 'update_rate', 1.0)  # Default 1.0 Hz
-        frequency = update_rate  # Already in Hz format
+        update_frequency = getattr(obj, 'update_frequency', 1.0)  # Default 1.0 Hz
+        frequency = update_frequency  # Already in Hz format
         
         if frequency not in self.frequency_groups:
             self.frequency_groups[frequency] = {
@@ -1499,11 +1441,11 @@ class SimulationManager:
 
 # Convenience functions for common use cases
 def create_simple_simulation(visualization: bool = True, 
-                           update_rate: float = 60.0,
+                           update_frequency: float = 60.0,
                            real_time_factor: float = 1.0) -> SimulationManager:
     """Create a simple simulation manager with default settings"""
     config = SimulationConfig(
-        update_rate=update_rate,
+        update_frequency=update_frequency,
         visualization=visualization,
         real_time_factor=real_time_factor
     )

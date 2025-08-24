@@ -41,7 +41,7 @@ def create_patrol_robot(sim_manager: SimulationManager, robot_name: str, patrol_
             robot_name, 
             robot_urdf_path, 
             initial_pose=initial_pose,
-            joint_update_rate=50.0  # Lower frequency for smoother demo
+            joint_update_frequency=50.0  # Lower frequency for smoother demo
         )
         
         # Set up patrol behavior
@@ -88,7 +88,7 @@ def create_search_robot(sim_manager: SimulationManager, robot_name: str, search_
             robot_name,
             robot_urdf_path,
             initial_pose=initial_pose,
-            joint_update_rate=30.0
+            joint_update_frequency=30.0
         )
         
         # Set up search behavior
@@ -149,7 +149,7 @@ def create_follower_robot(sim_manager: SimulationManager, robot_name: str, leade
             robot_name,
             robot_urdf_path,
             initial_pose=follower_pose,
-            joint_update_rate=40.0
+            joint_update_frequency=40.0
         )
         
         # Set up following behavior
@@ -197,7 +197,7 @@ def create_coordinated_demo():
     config = SimulationConfig(
         visualization=True,
         real_time_factor=1.5,  # Slightly faster than real-time
-        update_rate=100.0,
+        update_frequency=100.0,
         time_step=0.01
     )
     

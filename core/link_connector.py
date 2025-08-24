@@ -56,7 +56,7 @@ class RobotLinkConnector:
         # Update management
         self._update_thread: Optional[threading.Thread] = None
         self._running = False
-        self._update_rate = 120.0  # High frequency for smooth motion
+        self._update_frequency = 120.0  # High frequency for smooth motion
         
         # Performance tracking
         self._update_count = 0
@@ -303,7 +303,7 @@ class RobotLinkConnector:
     
     def _update_loop(self):
         """Main update loop running in separate thread"""
-        dt = 1.0 / self._update_rate
+        dt = 1.0 / self._update_frequency
         
         while self._running:
             loop_start = time.time()
@@ -332,7 +332,7 @@ class RobotLinkConnector:
         self._update_thread.daemon = True
         self._update_thread.start()
         
-        print(f"🚀 Link connector update loop started ({self._update_rate} Hz)")
+        print(f"🚀 Link connector update loop started ({self._update_frequency} Hz)")
     
     def stop_update_loop(self):
         """Stop the connection update loop"""
@@ -387,7 +387,7 @@ class RobotLinkConnector:
         
         print(f"\n🔗 Link Connector Status")
         print(f"Total connections: {total_connections}")
-        print(f"Update rate: {self._update_rate} Hz")
+        print(f"Update frequency: {self._update_frequency} Hz")
         print(f"Running: {self._running}")
         print("=" * 50)
         

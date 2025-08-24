@@ -5,4 +5,3 @@
 - 適宜readme.mdやコード内のコメントアップデートを行う。
 - 機能が確認できたらgit commitを行う。pushはしない
 - 当面の目標はexample/beginner/basic_example.pyを利用した基礎機能の検証
- - ロボット100台を最速で動かすと、何倍速で動かせるかの検証

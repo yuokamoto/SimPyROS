@@ -113,9 +113,9 @@ def comprehensive_demo(duration: float = 30.0, setup_repos: bool = True):
     # Phase 2: Create simulation with advanced configuration
     print("\n🎮 Phase 2: Creating advanced simulation...")
     config = SimulationConfig(
-        update_rate=80.0,  # High update rate
+        update_frequency=80.0,  # High update frequency
         visualization=True,
-        visualization_update_rate=40.0,  # Smooth visualization
+        visualization_update_frequency=40.0,  # Smooth visualization
         window_size=(1400, 900),  # Large window
         auto_setup_scene=True
     )
@@ -388,9 +388,9 @@ def headless_demo(duration: float = 15.0):
     
     # Force headless mode
     config = SimulationConfig(
-        update_rate=100.0,  # Very high update rate
+        update_frequency=100.0,  # Very high update frequency
         visualization=False,  # Headless
-        visualization_update_rate=0.0
+        visualization_update_frequency=0.0
     )
     
     sim = SimulationManager(config)

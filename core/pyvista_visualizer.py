@@ -15,6 +15,8 @@ from typing import Optional, Tuple, List, Dict, Union
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+# Remove unused common imports - no longer needed
+
 # Import URDF loaders in order of preference
 try:
     from core.urdf_loader import URDFLoader
@@ -183,6 +185,100 @@ class PyVistaVisualizer:
         """Context manager for batch rendering to improve performance"""
         return BatchRenderingContext(self)
     
+    def update_simulation_object(self, object_name: str, obj) -> bool:
+        """Update visualization for a simulation object (box, sphere, etc.)
+        
+        Args:
+            object_name: Name of the simulation object
+            obj: SimulationObject instance
+            
+        Returns:
+            bool: True if update succeeded
+        """
+        if not self.available or not self.plotter:
+            return False
+        
+        try:
+            # Check if object has an associated mesh actor
+            if hasattr(obj, '_mesh_actor') and obj._mesh_actor is not None:
+                # Update transformation matrix
+                transform_matrix = obj.pose.to_transformation_matrix()
+                
+                # Set transformation on the mesh actor
+                try:
+                    vtk_matrix = self.pv.vtk.vtkMatrix4x4()
+                    for i in range(4):
+                        for j in range(4):
+                            vtk_matrix.SetElement(i, j, transform_matrix[i, j])
+                    obj._mesh_actor.SetUserMatrix(vtk_matrix)
+                    return True
+                except Exception as e:
+                    print(f"⚠️ Failed to update {object_name} transformation: {e}")
+                    return False
+            else:
+                # Object not yet visualized, create mesh if needed
+                return self.create_object_mesh(object_name, obj)
+                
+        except Exception as e:
+            print(f"⚠️ Failed to update visualization for {object_name}: {e}")
+            return False
+
+    def create_object_mesh(self, object_name: str, obj) -> bool:
+        """Create mesh representation for simulation object
+        
+        Args:
+            object_name: Name of the simulation object  
+            obj: SimulationObject instance
+            
+        Returns:
+            bool: True if mesh creation succeeded
+        """
+        if not self.available or not self.plotter:
+            return False
+        
+        try:
+            mesh = None
+            # Create mesh based on object parameters
+            if hasattr(obj.parameters, 'geometry_type'):
+                geometry_type = obj.parameters.geometry_type
+                params = getattr(obj.parameters, 'geometry_params', {})
+                
+                if geometry_type == "box":
+                    size = params.get('size', [0.3, 0.3, 0.3])
+                    mesh = self.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
+                elif geometry_type == "cylinder":
+                    radius = params.get('radius', 0.05)
+                    height = params.get('height', 0.2)
+                    mesh = self.pv.Cylinder(radius=radius, height=height, direction=(0, 0, 1))
+                elif geometry_type == "sphere":
+                    radius = params.get('radius', 0.1)
+                    mesh = self.pv.Sphere(radius=radius)
+            
+            if mesh is not None:
+                # Apply current transformation
+                transform_matrix = obj.pose.to_transformation_matrix()
+                mesh.transform(transform_matrix, inplace=True)
+                
+                # Get color
+                color = getattr(obj.parameters, 'color', (0.6, 0.6, 0.6))
+                if len(color) > 3:
+                    color = color[:3]  # RGB only for PyVista
+                
+                # Add to scene and store reference
+                actor = self.plotter.add_mesh(
+                    mesh, 
+                    color=color, 
+                    opacity=0.8, 
+                    name=f"object_{object_name}"
+                )
+                obj._mesh_actor = actor
+                return True
+                
+        except Exception as e:
+            print(f"⚠️ Failed to create mesh for {object_name}: {e}")
+            
+        return False
+
     def __del__(self):
         if self.plotter:
             self.plotter.close()
@@ -1115,7 +1211,7 @@ class URDFRobotVisualizer(PyVistaVisualizer):
                              if robot.joints[name].joint_type.value != 'fixed']
         }
     
-    def start_continuous_update(self, robot_name: str, update_rate: float = 60.0):
+    def start_continuous_update(self, robot_name: str, update_frequency: float = 60.0):
         """Start continuous visualization updates (for real-time animation)"""
         if robot_name not in self.robots:
             return False
@@ -1124,7 +1220,7 @@ class URDFRobotVisualizer(PyVistaVisualizer):
         import time
         
         def update_loop():
-            dt = 1.0 / update_rate
+            dt = 1.0 / update_frequency
             while robot_name in self.robots:
                 self.update_robot_visualization(robot_name)
                 time.sleep(dt)
