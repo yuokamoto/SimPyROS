@@ -85,8 +85,7 @@ class BaseMonitor(ABC):
             ("Real Time", "real_time", "s"), 
             ("Target RT Factor", "target_rt_factor", "x"),
             ("Actual RT Factor", "actual_rt_factor", "x"),
-            ("Timing Accuracy", "timing_accuracy", "%"),
-            ("Time Step", "time_step", "s"),  # Remove Update Rate - TimeStep is sufficient
+            ("Time Step", "time_step", "s"),
             ("Active Robots", "active_robots", ""),
             ("Active Objects", "active_objects", ""),
         ]
@@ -138,8 +137,6 @@ class BaseMonitor(ABC):
                     text = f"{display_name}: {value:.1f} {unit}"
                 elif key in ["target_rt_factor", "actual_rt_factor"] and isinstance(value, (int, float)):
                     text = f"{display_name}: {value:.2f} {unit}"
-                elif key == "timing_accuracy" and isinstance(value, (int, float)):
-                    text = f"{display_name}: {value:.1f} {unit}"
                 elif key == "time_step" and isinstance(value, (int, float)):
                     text = f"{display_name}: {value:.1f} {unit}"
                 else:

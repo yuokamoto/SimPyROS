@@ -62,8 +62,7 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
             ("Real Time", "real_time", "s"), 
             ("Target RT Factor", "target_rt_factor", "x"),
             ("Actual RT Factor", "actual_rt_factor", "x"),
-            ("Timing Accuracy", "timing_accuracy", "%"),
-            ("Time Step", "time_step", "s"),  # Remove Update Rate - TimeStep is sufficient
+            ("Time Step", "time_step", "s"),
             ("Active Robots", "active_robots", ""),
             ("Active Objects", "active_objects", ""),
         ]
@@ -105,8 +104,6 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
                             text = f"{field_key.replace('_', ' ').title()}: {value:.2f}x"
                         elif field_key == "real_time" and isinstance(value, (int, float)):
                             text = f"Real Time: {value:.1f}s"
-                        elif field_key == "timing_accuracy" and isinstance(value, (int, float)):
-                            text = f"Timing Accuracy: {value:.1f}%"
                         elif field_key == "time_step" and isinstance(value, (int, float)):
                             text = f"Time Step: {value:.3f}s"
                         else:
