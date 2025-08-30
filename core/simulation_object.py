@@ -680,7 +680,7 @@ class SimulationObject:
             True if navigation started, False if no navigation controller or already running
         """
         if not self._navigation_controller:
-            from core.logger import get_logger, log_error
+            from core.utils.logger import get_logger, log_error
             logger = get_logger(__name__)
             log_error(logger, f"SimulationObject '{self.parameters.name}': No navigation controller configured")
             return False

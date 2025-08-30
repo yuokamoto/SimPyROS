@@ -70,17 +70,27 @@
 - すべてのINFOがターミナルに出力されると見づらい。coreは機能ごとに別々のlogにsaveするようにした。logにするかterminalに出力するか、それぞれ機能ごとに選べるとよい
 
 13. features
-- sensor mode, separate, unified 
-- hardcoded sensor update and nav update frequency
-- frequency group for navigation and sensor
 - process_separated_monitor
 - separated pyvistaでinteractiveが動作しない
 - real time factor がシミュレーション開始時にすごく大きくなる問題。小さい値から上げてったほうが良いのか？
-- _control_callback_process_loop のhardcoded frequency
 - update object visualization とrobot visualization別れている意味？
-- duration mode いらない
-- frequency group 確認
-- 
 
 15. later
-- - urdf load in simulation_object
+- urdf load in simulation_object
+- simulation loop for each sensor
+- frequency group 確認, navigation and sensor
+- simulation managerとrobot の役割分担どうするか。
+- monitor controls 機能追加・テスト
+
+16. memo
+- run_simulation_loopでplotter.updateをループで呼んでる。
+- visualization_process_loop -> update_robot_visualizationとupdate_simulation_objectがループで呼ばらている
+- それ以外の更新はそれぞれのクラスでやってる?
+
+
+
+- plotter_updateはブロッキングだとしても、visualization_loopはメインループと別だからシミュレーションのスピードに影響はしない？
+
+
+- pyvistaの使い方
+- shredmemoryの使い方

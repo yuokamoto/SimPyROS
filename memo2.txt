@@ -1,7 +1,8 @@
 
-- claudとのやり取りは日本語、ソースコード中のコメントや出力は英語
+- chatとのやり取りは日本語、ソースコード中のコメントや出力は英語
 - printではなくloggingをつかう
 - テストは仮想環境を使う
 - 適宜readme.mdやコード内のコメントアップデートを行う。
 - 機能が確認できたらgit commitを行う。pushはしない
 - 当面の目標はexample/beginner/basic_example.pyを利用した基礎機能の検証
+- まずは、--vb pyvista でのシミュレーションの最適化

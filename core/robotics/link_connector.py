@@ -18,8 +18,8 @@ from dataclasses import dataclass
 import warnings
 import threading
 
-from core.simulation_object import SimulationObject, Pose
-from core.robot import Robot
+from ..simulation_object import SimulationObject, Pose
+from .robot import Robot
 
 
 @dataclass

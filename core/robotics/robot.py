@@ -14,11 +14,11 @@ import warnings
 import time
 import threading
 
-from core.simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
-from core.urdf_loader import URDFLoader, URDFLink, URDFJoint
+from ..simulation_object import SimulationObject, ObjectParameters, ObjectType, Pose, Velocity
+from .urdf_loader import URDFLoader, URDFLink, URDFJoint
 import copy
-from core.time_manager import TimeManager, get_global_time_manager
-from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
+from ..time_manager import TimeManager, get_global_time_manager
+from ..utils.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
 from scipy.spatial.transform import Rotation
 
 
@@ -195,6 +195,9 @@ class Link:
         self.geometry_params = link_info.geometry_params.copy()
         self.color = link_info.color
         self.mesh_path = link_info.mesh_path
+        
+        # Visual origin information (from URDF <visual><origin>)
+        self.visual_pose: Optional[Pose] = link_info.pose
         
         # Current transform (computed from joints)
         self.current_pose: Optional[Pose] = None
@@ -381,6 +384,10 @@ class Robot(SimulationObject):
             log_debug(logger, f"   Links: {len(self.links)}, Joints: {len(self.joints)}")
             log_debug(logger, f"   Base link: {self.base_link_name}")
             
+            # Clear urdf_loader after extracting all needed data to save memory
+            # All necessary information is now stored in self.links and self.joints
+            self.urdf_loader = None
+            
             return True
             
         except Exception as e:
@@ -493,7 +500,7 @@ class Robot(SimulationObject):
         """Update objects connected to robot links (if link connector is available)"""
         try:
             # Import here to avoid circular dependency
-            from core.link_connector import get_link_connector
+            from ..link_connector import get_link_connector
             
             connector = get_link_connector()
             
@@ -740,7 +747,7 @@ class Robot(SimulationObject):
         
         try:
             # Create a mock URDFLink object
-            from core.urdf_loader import URDFLink
+            from ..urdf_loader import URDFLink
             
             # Ensure color is RGBA
             if len(color) == 3:
@@ -804,7 +811,7 @@ class Robot(SimulationObject):
         
         try:
             # Create a mock URDFJoint object
-            from core.urdf_loader import URDFJoint
+            from ..urdf_loader import URDFJoint
             
             # Convert joint_type to string if enum
             if isinstance(joint_type, JointType):
@@ -909,11 +916,8 @@ class Robot(SimulationObject):
     
     def get_visualization_data(self) -> Dict[str, Any]:
         """Get data for visualization systems (PyVista integration)"""
-        if self.urdf_loader is None:
-            return {}
-            
         return {
-            'urdf_loader': self.urdf_loader,
+            'links': self.links,  # Contains all visual information including visual_pose
             'current_joint_positions': self.get_joint_positions(),
             'link_poses': self.get_link_poses(),
             'robot_base_pose': self.pose
@@ -1005,7 +1009,7 @@ def create_robot_programmatically(env: simpy.Environment,
     robot.time_manager = time_manager or get_global_time_manager()
     
     # Initialize parent SimulationObject
-    from core.simulation_object import SimulationObject
+    from ..simulation_object import SimulationObject
     SimulationObject.__init__(robot, env, parameters, time_manager)
     
     # Initialize robot-specific attributes

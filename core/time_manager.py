@@ -12,7 +12,7 @@ import math
 import threading
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
-from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
+from core.utils.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
 
 
 @dataclass

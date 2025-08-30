@@ -26,8 +26,8 @@ import warnings
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from core.simulation_object import Pose
-from core.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
+from ..simulation_object import Pose
+from ..utils.logger import get_logger, log_success, log_warning, log_error, log_debug, log_info
 from scipy.spatial.transform import Rotation
 import copy
 import time
@@ -395,7 +395,7 @@ class URDFLoader:
     
     def _extract_visual_origin(self, visual, urdf_link: URDFLink):
         """Extract visual origin (pose) information from URDF visual element"""
-        from core.simulation_object import Pose
+        from ..simulation_object import Pose
         
         # Default pose (no transformation)
         origin_pos = np.array([0.0, 0.0, 0.0])

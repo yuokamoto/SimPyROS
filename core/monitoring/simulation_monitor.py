@@ -35,6 +35,13 @@ import signal
 import sys
 from abc import ABC, abstractmethod
 
+# Import centralized logging
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from utils.logger import get_logger
+
+# Module-level logger
+logger = get_logger(__name__)
+
 
 class BaseMonitor(ABC):
     """Base class for simulation monitors with shared UI creation logic"""
@@ -47,6 +54,7 @@ class BaseMonitor(ABC):
         self.buttons = {}
         self.data_file = os.path.join(tempfile.gettempdir(), "simpyros_monitor_data.json")
         self.update_interval = 0.5  # Default update frequency
+        self.logger = get_logger(__name__)
         
         # Control state
         self.control_enabled = False
@@ -186,7 +194,7 @@ class BaseMonitor(ABC):
                     buttons_dict['play_pause'].config(text="Pause")
         
         except Exception as e:
-            print(f"⚠️ Monitor UI update error: {e}")
+            self.logger.warning(f"Monitor UI update error: {e}")
     
     @staticmethod
     def format_field_simple(field_key: str, value: Any) -> str:
@@ -312,7 +320,7 @@ class BaseMonitor(ABC):
             with open(self.data_file, 'w') as f:
                 json.dump(sim_data, f)
         except Exception as e:
-            print(f"⚠️ Monitor data file write error: {e}")
+            self.logger.warning(f"Monitor data file write error: {e}")
 
 
 class SimulationMonitor(BaseMonitor):
@@ -337,38 +345,50 @@ class SimulationMonitor(BaseMonitor):
         self.control_callback = control_callback
         self._stop_event.clear()  # Clear any previous stop signals
         self.running = True
-        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=False)
+        self.monitor_thread = threading.Thread(target=self._run_monitor, daemon=True)
         self.monitor_thread.start()
         
     def stop(self):
         """Stop the monitor window with thread-safe handling"""
-        print("🛑 Stopping simulation monitor...")
+        self.logger.info("Stopping simulation monitor...")
         self.running = False
         
         # Signal monitor thread to close gracefully
         self._signal_close()
         
-        # Wait for monitor thread to finish
+        # Wait for monitor thread to finish with shorter timeout
         if hasattr(self, 'monitor_thread') and self.monitor_thread and self.monitor_thread.is_alive():
-            print("⏳ Waiting for monitor thread to finish...")
-            self.monitor_thread.join(timeout=3.0)
+            self.logger.info("Waiting for monitor thread to finish...")
+            self.monitor_thread.join(timeout=1.0)  # Reduced from 3.0 to 1.0 seconds
             if self.monitor_thread.is_alive():
-                print("⚠️ Monitor thread did not finish gracefully")
+                self.logger.warning("Monitor thread did not finish gracefully, forcing shutdown...")
+                # Force window destruction if thread is stuck
+                if self.window:
+                    try:
+                        self.window.quit()
+                        self.window.destroy()
+                        self.logger.info("Forced window destruction")
+                    except Exception as e:
+                        self.logger.warning(f"Error forcing window destruction: {e}")
+                # Give it one more short chance to finish
+                self.monitor_thread.join(timeout=0.5)
+                if self.monitor_thread.is_alive():
+                    self.logger.warning("Monitor thread still alive after forced shutdown")
         
         # Clean up data file
         try:
             if os.path.exists(self.data_file):
                 os.remove(self.data_file)
-                print("🧹 Monitor data file cleaned up")
+                self.logger.info("Monitor data file cleaned up")
         except Exception as e:
-            print(f"⚠️ Failed to clean up monitor data file: {e}")
+            self.logger.warning(f"Failed to clean up monitor data file: {e}")
             
         self.window = None
-        print("✅ Monitor stopped successfully")
+        self.logger.info("Monitor stopped successfully")
         
     def _signal_close(self):
         """Signal the monitor thread to close (thread-safe)"""
-        print("📡 Setting stop event for monitor thread")
+        self.logger.debug("Setting stop event for monitor thread")
         self._stop_event.set()  # Thread-safe signaling
                 
     def _run_monitor(self):
@@ -378,7 +398,7 @@ class SimulationMonitor(BaseMonitor):
             import os
             display = os.environ.get('DISPLAY', '')
             if not display:
-                print("❌ No DISPLAY environment variable, cannot create monitor window")
+                self.logger.error("No DISPLAY environment variable, cannot create monitor window")
                 self.running = False
                 return
             
@@ -398,13 +418,13 @@ class SimulationMonitor(BaseMonitor):
             # Set up error handling for X11 issues
             def on_closing():
                 """Handle window close event"""
-                print("🔴 Monitor window close requested")
+                self.logger.debug("Monitor window close requested")
                 self.running = False
                 try:
                     if self.window:
                         self.window.quit()  # Exit mainloop
                 except Exception as e:
-                    print(f"⚠️ Error during window close: {e}")
+                    self.logger.warning(f"Error during window close: {e}")
             
             self.window.protocol("WM_DELETE_WINDOW", on_closing)
             
@@ -412,7 +432,7 @@ class SimulationMonitor(BaseMonitor):
             test_label.destroy()
             
             # Skip topmost setting to avoid X11 issues
-            print("📊 Creating simple monitor layout...")
+            self.logger.info("Creating simple monitor layout...")
             
             # Create main frame using basic tkinter (no ttk styling)
             main_frame = tk.Frame(self.window, bg='white', padx=10, pady=10)
@@ -424,20 +444,34 @@ class SimulationMonitor(BaseMonitor):
             # Start periodic update
             self.window.after(int(self.update_interval * 1000), self._update_display)
             
-            print("✅ Monitor window created successfully")
+            self.logger.info("Monitor window created successfully")
             
-            # Start the tkinter main loop with improved error handling
+            # Start the tkinter main loop with improved error handling and periodic stop checks
             try:
-                print("🎬 Starting tkinter mainloop...")
+                self.logger.debug("Starting tkinter mainloop...")
+                
+                # Add periodic stop checking during mainloop
+                def check_for_stop():
+                    if self._stop_event.is_set() or not self.running:
+                        self.logger.debug("Stop signal detected during mainloop, quitting...")
+                        self.window.quit()
+                        return
+                    # Schedule next check
+                    if self.window and self.running:
+                        self.window.after(100, check_for_stop)  # Check every 100ms
+                
+                # Start periodic stop checking
+                self.window.after(100, check_for_stop)
+                
                 self.window.mainloop()
-                print("✅ Monitor window mainloop exited gracefully")
+                self.logger.debug("Monitor window mainloop exited gracefully")
             except Exception as e:
-                print(f"❌ Monitor window mainloop error: {e}")
+                self.logger.error(f"Monitor window mainloop error: {e}")
                 # Don't increment error count for normal shutdown
                 if not self._stop_event.is_set():
                     self.x11_error_count += 1
                     if self.x11_error_count >= self.max_x11_errors:
-                        print("❌ Too many X11 errors, disabling monitor")
+                        self.logger.error("Too many X11 errors, disabling monitor")
             finally:
                 self.running = False
                 # Clean up window within the same thread
@@ -445,14 +479,14 @@ class SimulationMonitor(BaseMonitor):
                     try:
                         if self.window.winfo_exists():
                             self.window.destroy()
-                            print("✅ Monitor window destroyed in thread")
+                            self.logger.debug("Monitor window destroyed in thread")
                     except Exception as e:
-                        print(f"⚠️ Error destroying window in thread: {e}")
+                        self.logger.warning(f"Error destroying window in thread: {e}")
                     finally:
                         self.window = None
                 
         except Exception as e:
-            print(f"❌ Monitor window creation failed: {e}")
+            self.logger.error(f"Monitor window creation failed: {e}")
             self.running = False
             if self.window:
                 try:
@@ -468,10 +502,15 @@ class SimulationMonitor(BaseMonitor):
             
         # Check for close signal (thread-safe event)
         if self._stop_event.is_set():
-            print("📡 Received stop event, shutting down monitor")
+            self.logger.debug("Received stop event, shutting down monitor")
             self.running = False
             if self.window:
-                self.window.quit()  # Exit mainloop from within the thread
+                try:
+                    self.window.quit()  # Exit mainloop from within the thread
+                    self.window.destroy()  # Also destroy the window
+                    self.logger.debug("Window quit and destroy called from update_display")
+                except Exception as e:
+                    self.logger.warning(f"Error during window shutdown in update_display: {e}")
             return
             
         # Use BaseMonitor class method for data reading
@@ -500,7 +539,7 @@ class SimulationMonitor(BaseMonitor):
                 self.window.after(int(self.update_interval * 1000), self._update_display)
             except tk.TclError:
                 # If scheduling fails, stop the monitor
-                print("❌ Failed to schedule next update, stopping monitor")
+                self.logger.error("Failed to schedule next update, stopping monitor")
                 self.running = False
             
     # Inherited methods from BaseMonitor:
@@ -522,14 +561,14 @@ def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, c
         Monitor instance (process-separated for better thread safety)
     """
     try:
-        from core.process_separated_monitor import create_process_separated_monitor
-        print("📊 Using process-separated monitor for better thread safety")
+        from ..process_separated_monitor import create_process_separated_monitor
+        logger.info("Using process-separated monitor for better thread safety")
         monitor = create_process_separated_monitor(title)
         monitor.show_debug_info = show_debug_info  # Set debug flag
         monitor.start(enable_controls, control_callback)
         return monitor
     except Exception as e:
-        print(f"⚠️ Process-separated monitor not available, using threaded version: {e}")
+        logger.warning(f"Process-separated monitor not available, using threaded version: {e}")
         monitor = SimulationMonitor(title)
         monitor.show_debug_info = show_debug_info  # Set debug flag
         monitor.start(enable_controls, control_callback)
@@ -540,8 +579,8 @@ def create_simulation_monitor(title="SimPyROS Monitor", enable_controls=False, c
 def main():
     """Run standalone simulation monitor"""
     monitor = SimulationMonitor("SimPyROS Simulation Monitor")
-    print("Starting SimPyROS monitor window...")
-    print("Press Ctrl+C to exit")
+    logger.info("Starting SimPyROS monitor window...")
+    logger.info("Press Ctrl+C to exit")
     
     try:
         monitor.start(enable_controls=True)
@@ -549,7 +588,7 @@ def main():
         while monitor.running:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nStopping monitor...")
+        logger.info("Stopping monitor...")
         monitor.stop()
 
 

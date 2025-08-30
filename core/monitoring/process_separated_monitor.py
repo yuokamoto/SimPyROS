@@ -13,8 +13,8 @@ import time
 import json
 import tempfile
 from typing import Dict, Any, Optional
-from core.multiprocessing_cleanup import register_multiprocessing_process
-from core.simulation_monitor import BaseMonitor
+from ..utils.multiprocessing_cleanup import register_multiprocessing_process
+from .simulation_monitor import BaseMonitor
 
 
 def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
@@ -56,7 +56,7 @@ def run_monitor_process(data_file: str, title: str = "SimPyROS Monitor"):
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Use BaseMonitor class methods for UI creation
-        from core.simulation_monitor import BaseMonitor
+        from ..simulation_monitor import BaseMonitor
         
         labels_dict, buttons_dict, status_label = BaseMonitor.create_monitor_ui(
             parent_frame=main_frame,

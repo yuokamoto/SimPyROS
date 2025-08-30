@@ -11,7 +11,7 @@ import atexit
 import signal
 import os
 from typing import List
-from core.logger import get_logger, log_info, log_warning
+from .logger import get_logger, log_info, log_warning
 
 logger = get_logger('simpyros.multiprocessing_cleanup')
 

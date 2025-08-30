@@ -22,8 +22,8 @@ from dataclasses import dataclass
 import simpy
 
 # Relative imports
-from .simulation_object import Pose, Velocity
-from .logger import get_logger, log_info, log_error, log_debug, log_warning
+from ..simulation_object import Pose, Velocity
+from ..utils.logger import get_logger, log_info, log_error, log_debug, log_warning
 
 
 @dataclass

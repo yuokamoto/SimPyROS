@@ -14,8 +14,8 @@ import signal
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory, Queue
-from core.logger import get_logger, log_info, log_warning, log_error, log_debug
-from core.multiprocessing_cleanup import register_multiprocessing_process, register_multiprocessing_queue
+from ..utils.logger import get_logger, log_info, log_warning, log_error, log_debug
+from ..utils.multiprocessing_cleanup import register_multiprocessing_process, register_multiprocessing_queue
 from typing import Dict, List, Optional, Tuple, Any
 import struct
 import warnings
@@ -27,7 +27,9 @@ import pickle
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from core.simulation_object import Pose
+from ..simulation_object import Pose
+from .pyvista_core import PyVistaCoreHandler
+from .pyvista_visualizer import URDFRobotVisualizer
 
 
 @dataclass
@@ -246,30 +248,28 @@ class PoseSharedMemoryManager:
             pass
 
 
-class PyVistaVisualizationProcess:
-    """PyVista visualization process with geometry + pose updates"""
+class ProcessURDFVisualizer(URDFRobotVisualizer):
+    """Process-separated URDF robot visualizer inheriting from URDFRobotVisualizer"""
     
     def __init__(self, config: SharedMemoryConfig, shm_name: str, geometry_queue: Queue):
+        # Initialize parent URDFRobotVisualizer with process-safe parameters
+        super().__init__(interactive=True, window_size=(1200, 800))
+        
+        # Process-specific configuration
         self.config = config
         self.shm_name = shm_name
         self.geometry_queue = geometry_queue
-        
-        # Robot storage
-        self.robots = {}  # robot_name -> visualization data
-        self.robot_actors = {}  # robot_name -> pyvista actors
-        self.robot_initial_meshes = {}  # robot_name -> {link_name -> initial_mesh}
+        self.shm = None
         
         # Performance tracking
         self.frame_count = 0
         self.start_time = time.time()
         
-        # PyVista module reference (will be set in run())
-        self.pv = None
-        self.plotter = None
-        self.shm = None
-        
         # Update control
         self._update_active = False
+        
+        # Process-specific robot storage (in addition to parent's self.robots)
+        self.robot_initial_meshes = {}  # robot_name -> {link_name -> initial_mesh}
         
     def run(self):
         """Main visualization process loop"""
@@ -288,54 +288,16 @@ class PyVistaVisualizationProcess:
         log_info(get_logger('simpyros.pyvista_process'), "✅ Signal handlers installed in PyVista process")
         
         try:
-            # Import PyVista in the visualization process
-            log_info(get_logger('simpyros.pyvista_process'), "🔄 Importing PyVista...")
-            import pyvista as pv
-            self.pv = pv  # Store reference for other methods
-            log_info(get_logger('simpyros.pyvista_process'), f"✅ PyVista imported successfully (version: {pv.__version__})")
+            # PyVista initialization already done in parent URDFRobotVisualizer constructor
+            log_info(get_logger('simpyros.pyvista_process'), f"✅ PyVista already initialized by parent URDFRobotVisualizer")
             
-            # Debug: Check geometry queue immediately
-            log_debug(get_logger('simpyros.pyvista_process'), f"🔍 Checking initial geometry queue... Queue size: {self.geometry_queue.qsize()}")
-            if not self.geometry_queue.empty():
-                log_debug(get_logger('simpyros.pyvista_process'), "📦 Found geometry data in queue at startup!")
-            else:
-                log_debug(get_logger('simpyros.pyvista_process'), "📭 Geometry queue is empty at startup")
-            
-            # Check if we have a display available
-            display = os.environ.get('DISPLAY', '')
-            interactive_mode = bool(display and display != '')
-            log_info(get_logger('simpyros.pyvista_process'), f"📺 Display check: DISPLAY={display}, interactive_mode={interactive_mode}")
-            
-            if not interactive_mode:
-                log_info(get_logger('simpyros.pyvista_process'), "💻 Headless mode detected - starting Xvfb")
-                pv.start_xvfb()  # Only for headless support
-                pv.OFF_SCREEN = True
-            else:
-                log_info(get_logger('simpyros.pyvista_process'), f"📺 Interactive mode detected - DISPLAY={display}")
-                # Set PyVista to use the display
-                pv.OFF_SCREEN = False
-                log_debug(get_logger('simpyros.pyvista_process'), f"⚙️ PyVista OFF_SCREEN set to: {pv.OFF_SCREEN}")
-                
-            # Setup plotter with appropriate settings
-            log_info(get_logger('simpyros.pyvista_process'), "🎨 Creating plotter...")
-            self.plotter = pv.Plotter(
-                window_size=(1200, 800), 
-                off_screen=not interactive_mode,
-                title="SimPyROS Process-Separated PyVista"
-            )
-            log_info(get_logger('simpyros.pyvista_process'), "✅ Plotter created successfully")
-            
-            log_info(get_logger('simpyros.pyvista_process'), "🔧 Adding axes...")
-            self.plotter.add_axes()
-            log_info(get_logger('simpyros.pyvista_process'), "✅ Axes added")
-            
-            log_info(get_logger('simpyros.pyvista_process'), f"🚀 PyVista visualization process started ({'Interactive' if interactive_mode else 'Headless'} mode)")
+            # Debug: Check geometry queue
+            log_debug(get_logger('simpyros.pyvista_process'), f"🔍 Geometry queue size: {self.geometry_queue.qsize()}")
             
             # Connect to shared memory
             self.shm = shared_memory.SharedMemory(name=self.shm_name)
             
-            # Setup initial scene
-            self._setup_scene()
+            # Initial scene already setup by core handler above
             
             # Start main loop
             self._main_loop()
@@ -362,63 +324,7 @@ class PyVistaVisualizationProcess:
                     pass
             log_info(get_logger('simpyros.pyvista_process'), f"🛑 PyVista visualization process terminated (PID: {os.getpid()})")
             
-    def _setup_scene(self):
-        """Setup initial PyVista scene"""
-        log_info(get_logger('simpyros.pyvista_process'), "🎨 Setting up PyVista scene...")
-        
-        # Add ground plane
-        plane = self.pv.Plane(i_size=10, j_size=10)
-        self.plotter.add_mesh(plane, color='lightgray', opacity=0.3)
-        log_info(get_logger('simpyros.pyvista_process'), "✅ Ground plane added")
-        
-        # Set camera position
-        self.plotter.camera_position = [(5, 5, 5), (0, 0, 0), (0, 0, 1)]
-        log_info(get_logger('simpyros.pyvista_process'), "✅ Camera position set")
-        
-        # Setup interactive camera controls  
-        self._setup_interactive_camera()
-        
-    def _setup_interactive_camera(self):
-        """Setup interactive camera controls for mouse navigation"""
-        try:
-            log_info(get_logger('simpyros.pyvista_process'), "📷 Setting up interactive camera controls...")
-            
-            # Enable trackball interaction style for better 3D navigation
-            try:
-                self.plotter.enable_trackball_style()
-                log_info(get_logger('simpyros.pyvista_process'), "✅ Trackball style enabled")
-            except Exception as e:
-                log_warning(get_logger('simpyros.pyvista_process'), f"⚠️ Could not enable trackball style: {e}")
-            
-            # Configure camera properties for better interaction
-            try:
-                self.plotter.camera.view_angle = 60  # Field of view
-                self.plotter.camera.clipping_range = (0.1, 1000.0)  # Near/far clipping planes
-                log_info(get_logger('simpyros.pyvista_process'), "✅ Camera properties configured")
-            except Exception as e:
-                log_warning(get_logger('simpyros.pyvista_process'), f"⚠️ Could not set camera properties: {e}")
-            
-            # Enable depth peeling for better transparency
-            try:
-                if hasattr(self.plotter.ren_win, 'SetAlphaBitPlanes'):
-                    self.plotter.ren_win.SetAlphaBitPlanes(1)
-                if hasattr(self.plotter, 'enable_depth_peeling'):
-                    self.plotter.enable_depth_peeling()
-                log_info(get_logger('simpyros.pyvista_process'), "✅ Depth peeling enabled")
-            except Exception as e:
-                log_warning(get_logger('simpyros.pyvista_process'), f"⚠️ Could not enable depth peeling: {e}")
-                
-            log_info(get_logger('simpyros.pyvista_process'), "✅ Interactive camera controls configured")
-            log_info(get_logger('simpyros.pyvista_process'), "📱 Mouse controls:")
-            log_info(get_logger('simpyros.pyvista_process'), "   - Left click + drag: Rotate camera")
-            log_info(get_logger('simpyros.pyvista_process'), "   - Right click + drag: Zoom")
-            log_info(get_logger('simpyros.pyvista_process'), "   - Middle click + drag: Pan")
-            log_info(get_logger('simpyros.pyvista_process'), "   - Scroll wheel: Zoom in/out")
-            
-        except Exception as e:
-            log_warning(get_logger('simpyros.pyvista_process'), f"⚠️ Camera setup error: {e}")
-            import traceback
-            traceback.print_exc()
+    # Scene setup and camera controls now handled by PyVistaCoreHandler (composition pattern)
         
     def _main_loop(self):
         """Main visualization update loop"""
@@ -569,82 +475,55 @@ class PyVistaVisualizationProcess:
             pass  # Queue empty or other error
             
     def _load_robot_geometry(self, geometry_data: RobotGeometryData):
-        """Load robot geometry using extracted data with URDFRobotVisualizer logic"""
+        """Load robot geometry using parent URDFRobotVisualizer functionality"""
         robot_name = geometry_data.robot_name
         links_data = geometry_data.links_data
-        urdf_links_data = geometry_data.urdf_links_data
         
-        log_info(get_logger('simpyros.pyvista_process'), f"🎨 Loading geometry for robot: {robot_name} using URDFRobotVisualizer logic")
+        logger = get_logger('simpyros.pyvista_process')
+        log_info(logger, f"🎨 Loading geometry for robot: {robot_name} using parent URDFRobotVisualizer")
         
-        # Use the exact same logic as URDFRobotVisualizer._create_robot_link_actors_from_robot
-        actors = {}
-        initial_meshes = {}
+        # Create a mock robot instance with the geometry data
+        class MockRobot:
+            def __init__(self, links_data, urdf_links_data):
+                self.links = {}
+                for link_name, link_data in links_data.items():
+                    self.links[link_name] = MockLink(link_data, urdf_links_data.get(link_name))
         
-        for link_name, link_data in links_data.items():
-            # Create mesh based on geometry type (same as URDFRobotVisualizer)
-            mesh = None
-            geometry_type = link_data.get('geometry_type', 'box')
-            geometry_params = link_data.get('geometry_params', {})
-            color = link_data.get('color', [0.6, 0.6, 0.6, 1.0])
-            
-            log_debug(get_logger('simpyros.pyvista_process'), f"  🔧 Creating {geometry_type} mesh for {link_name}")
-            log_debug(get_logger('simpyros.pyvista_process'), f"      Params: {geometry_params}")
-            log_debug(get_logger('simpyros.pyvista_process'), f"      Color: {color}")
-            
-            if geometry_type == "box":
-                size = geometry_params.get('size', [0.3, 0.3, 0.1])
-                mesh = self.pv.Cube(x_length=size[0], y_length=size[1], z_length=size[2])
+        class MockLink:
+            def __init__(self, link_data, urdf_link_data):
+                self.geometry_type = link_data.get('geometry_type', 'box')
+                self.geometry_params = link_data.get('geometry_params', {})
+                self.color = link_data.get('color', (0.7, 0.7, 0.7))
                 
-            elif geometry_type == "cylinder":
-                radius = geometry_params.get('radius', 0.05)
-                length = geometry_params.get('length', 0.35)
-                # Use same parameters as URDFRobotVisualizer
-                mesh = self.pv.Cylinder(radius=radius, height=length, direction=(0, 0, 1))
-                
-            elif geometry_type == "sphere":
-                radius = geometry_params.get('radius', 0.08)
-                mesh = self.pv.Sphere(radius=radius)
-            
-            if mesh is not None:
-                # Store original mesh before any transforms
-                original_mesh = mesh.copy()
-                
-                # Apply visual origin transformation from URDF data (same as URDFRobotVisualizer)
-                if link_name in urdf_links_data and urdf_links_data[link_name].get('has_pose', False):
-                    urdf_link_data = urdf_links_data[link_name]
-                    position = np.array(urdf_link_data['position'])
-                    quaternion = np.array(urdf_link_data['quaternion'])
-                    
-                    # Recreate Pose and transform matrix
-                    from core.simulation_object import Pose
-                    pose = Pose.from_position_quaternion(position, quaternion)
-                    transform_matrix = pose.to_transformation_matrix()
-                    original_mesh.transform(transform_matrix, inplace=True)
-                    log_debug(get_logger('simpyros.pyvista_process'), f"      🔧 Applied visual origin to {link_name}: pos={position}")
-                
-                # Use color from extracted link data (same as URDFRobotVisualizer)
-                color_rgb = color[:3] if len(color) >= 3 else (0.6, 0.6, 0.6)
-                log_debug(get_logger('simpyros.pyvista_process'), f"      🎨 Using link color for {link_name}: {color_rgb}")
-                
-                # Add to plotter (same as URDFRobotVisualizer)
-                display_mesh = original_mesh.copy()
-                actor = self.plotter.add_mesh(
-                    display_mesh, 
-                    color=color_rgb,
-                    opacity=1.0,
-                    name=f"{robot_name}_{link_name}"
-                )
-                
-                # Store both actor and initial mesh
-                actors[link_name] = actor
-                initial_meshes[link_name] = original_mesh
-                
-                log_info(get_logger('simpyros.pyvista_process'), f"  ✅ Created {geometry_type} mesh for link: {link_name} with color {color_rgb}")
+                # Visual pose from URDF data
+                if urdf_link_data and urdf_link_data.get('has_pose'):
+                    from ..simulation_object import Pose
+                    from scipy.spatial.transform import Rotation
+                    pos = urdf_link_data['position']
+                    quat = urdf_link_data['quaternion']
+                    self.visual_pose = Pose()
+                    self.visual_pose.position = pos
+                    self.visual_pose.rotation = Rotation.from_quat(quat)
+                else:
+                    self.visual_pose = None
         
-        self.robot_actors[robot_name] = actors
-        self.robot_initial_meshes[robot_name] = initial_meshes
+        # Create mock robot and use parent class method
+        mock_robot = MockRobot(links_data, geometry_data.urdf_links_data)
+        
+        # Use parent's method to create link actors
+        self._create_robot_link_actors_from_robot(robot_name, mock_robot)
+        
+        # Store initial meshes for process-specific operations
+        if robot_name in self.link_actors:
+            initial_meshes = {}
+            for link_name, link_info in self.link_actors[robot_name].items():
+                if 'mesh' in link_info:
+                    initial_meshes[link_name] = link_info['mesh'].copy()
+            self.robot_initial_meshes[robot_name] = initial_meshes
+        
+        # Store geometry data for reference
         self.robots[robot_name] = geometry_data
-        log_info(get_logger('simpyros.pyvista_process'), f"✅ Robot geometry loaded: {robot_name} ({len(actors)} links)")
+        log_info(logger, f"✅ Robot geometry loaded via parent class: {robot_name}")
         
     def _update_robot_poses(self):
         """Update robot poses from shared memory"""
@@ -680,7 +559,7 @@ class PyVistaVisualizationProcess:
                 name_bytes = bytes(self.shm.buf[name_offset:name_offset + 64])
                 robot_name = name_bytes.decode('utf-8').rstrip('\x00')
                 
-                if robot_name not in self.robot_actors:
+                if robot_name not in self.link_actors:
                     continue
                 
                 # Read pose data with bounds checking
@@ -696,19 +575,20 @@ class PyVistaVisualizationProcess:
                     self.shm.buf[pose_offset:pose_offset + pose_data_size]
                 )
                 
-                # Update actor positions
-                actors = self.robot_actors[robot_name]
+                # Update actor positions using parent's link_actors structure
+                link_actors = self.link_actors[robot_name]
                 initial_meshes = self.robot_initial_meshes.get(robot_name, {})
-                link_names = sorted(actors.keys())
+                link_names = sorted(link_actors.keys())
                 
                 for i, link_name in enumerate(link_names[:int(num_links)]):
-                    if link_name in actors and link_name in initial_meshes:
+                    if link_name in link_actors and link_name in initial_meshes:
                         base_idx = i * 7
                         x, y, z = pose_data[base_idx:base_idx + 3]
                         qw, qx, qy, qz = pose_data[base_idx + 3:base_idx + 7]  # [w, x, y, z]
                         
-                        # Get actor and initial mesh
-                        actor = actors[link_name]
+                        # Get actor and initial mesh (adapted for parent's structure)
+                        link_info = link_actors[link_name]
+                        actor = link_info['actor'] if isinstance(link_info, dict) else link_info
                         initial_mesh = initial_meshes[link_name]
                         
                         # Create new mesh from initial state
@@ -776,14 +656,14 @@ class PyVistaVisualizationProcess:
         )
 
 
-class ProcessSeparatedPyVistaVisualizer:
+class ProcessManager:
     """
-    Process-separated PyVista visualizer with optimized data flow
+    Process manager for separated PyVista visualization with optimized data flow
     
     Features:
     1. One-time geometry transfer via Queue
     2. Continuous pose updates via shared memory
-    3. Standard PyVista logic compatibility
+    3. Process lifecycle management
     """
     
     def __init__(self, config: Optional[SharedMemoryConfig] = None):
@@ -862,22 +742,20 @@ class ProcessSeparatedPyVistaVisualizer:
                     
                     log_debug(self.logger, f"  📋 Extracted {link_name}: {links_data[link_name]}")
             
-            # Extract URDF visual origin data
-            if hasattr(robot_instance, 'urdf_loader') and robot_instance.urdf_loader:
-                urdf_loader = robot_instance.urdf_loader
-                if hasattr(urdf_loader, 'links'):
-                    for link_name, urdf_link_info in urdf_loader.links.items():
-                        if hasattr(urdf_link_info, 'pose') and urdf_link_info.pose is not None:
-                            # Store pose data for visual origin transformation
-                            pose = urdf_link_info.pose
-                            urdf_links_data[link_name] = {
-                                'has_pose': True,
-                                'position': pose.position.tolist() if hasattr(pose.position, 'tolist') else list(pose.position),
-                                'quaternion': pose.quaternion.tolist() if hasattr(pose.quaternion, 'tolist') else list(pose.quaternion)
-                            }
-                            log_debug(self.logger, f"  🔧 URDF visual origin for {link_name}: {urdf_links_data[link_name]}")
-                        else:
-                            urdf_links_data[link_name] = {'has_pose': False}
+            # Extract URDF visual origin data from Link objects
+            if hasattr(robot_instance, 'links'):
+                for link_name, link_obj in robot_instance.links.items():
+                    if hasattr(link_obj, 'visual_pose') and link_obj.visual_pose is not None:
+                        # Store pose data for visual origin transformation
+                        pose = link_obj.visual_pose
+                        urdf_links_data[link_name] = {
+                            'has_pose': True,
+                            'position': pose.position.tolist() if hasattr(pose.position, 'tolist') else list(pose.position),
+                            'quaternion': pose.rotation.as_quat().tolist()
+                        }
+                        log_debug(self.logger, f"  🔧 URDF visual origin for {link_name}: {urdf_links_data[link_name]}")
+                    else:
+                        urdf_links_data[link_name] = {'has_pose': False}
             
             # Send comprehensive geometry data
             geometry_data = RobotGeometryData(
@@ -980,7 +858,7 @@ class ProcessSeparatedPyVistaVisualizer:
         log_info(get_logger('simpyros.pyvista_process'), f"   Shared memory: {shm_name}")
         
         try:
-            viz = PyVistaVisualizationProcess(config, shm_name, geometry_queue)
+            viz = ProcessURDFVisualizer(config, shm_name, geometry_queue)
             viz.run()
         except Exception as e:
             log_error(get_logger('simpyros.pyvista_process'), f"❌ Visualization process failed: {e}")

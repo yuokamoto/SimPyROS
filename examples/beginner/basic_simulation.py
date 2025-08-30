@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from core.simulation_manager import SimulationManager
 from core.simulation_object import Velocity, Pose
-from core.logger import get_logger, set_log_level, log_debug, log_warning
+from core.utils.logger import get_logger, set_log_level, log_debug, log_warning
 
 # Setup logging configuration
 DEBUG_LEVEL = os.getenv('SIMPYROS_DEBUG', '1')  # 0=None, 1=Minimal, 2=Verbose

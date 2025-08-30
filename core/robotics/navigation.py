@@ -19,8 +19,8 @@ from abc import ABC, abstractmethod
 import simpy
 
 # Import from relative paths
-from .simulation_object import Pose, Velocity
-from .logger import get_logger, log_info, log_error, log_debug
+from ..simulation_object import Pose, Velocity
+from ..utils.logger import get_logger, log_info, log_error, log_debug
 
 
 class NavigationStrategy(ABC):
