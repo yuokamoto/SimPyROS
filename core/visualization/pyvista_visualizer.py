@@ -193,11 +193,32 @@ class BatchRenderingContext:
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Perform single render at end of batch for performance
+        # Perform single render at end of batch for performance, then lightweight event polling
+        # Option A implementation:
+        #  - Use plotter.render() once (fast path, no full update cycle duplication)
+        #  - Immediately process pending UI events (camera, mouse, keyboard) WITHOUT calling plotter.update()
+        #    because plotter.update() would invoke an additional render (double cost per frame)
+        #  - VTK interactor event processing is significantly cheaper than a full render traversal
         if self.visualizer.available and self.visualizer.plotter:
             try:
-                self.visualizer.plotter.render()
-                # Time display update removed - use monitor window
+                p = self.visualizer.plotter
+                p.render()
+                # Try to process pending events to keep camera interactive
+                # Different PyVista versions expose interactor as .iren; guard defensively.
+                iren = getattr(p, 'iren', None)
+                if iren is not None:
+                    try:
+                        # Process a single batch of pending events (non-blocking)
+                        iren.ProcessEvents()
+                    except Exception:
+                        pass
+                # Alternative backends (Qt) may expose an application event processor
+                app = getattr(p, 'app', None)
+                if app is not None:
+                    try:
+                        app.processEvents()
+                    except Exception:
+                        pass
             except Exception as e:
                 print(f"⚠️ Batch rendering error: {e}")
 
