@@ -502,21 +502,34 @@ class SimulationManager:
         dt = 1.0 / self.config.visualization_update_frequency
         
         while self._running and not self._shutdown_requested:
-            
-            # Standard visualization updates (deprecated batch rendering removed)
-            for robot_name, robot in self.robots.items():
-                try:
-                    self.visualizer.update_robot_visualization(robot_name)
-                except Exception as e:
-                    log_warning(self.logger, f"Robot visualization update error for {robot_name}: {e}")
-            
-            # Update simulation object visualizations
-            for object_name, obj in self.objects.items():
-                try:
-                    if hasattr(self.visualizer, 'update_simulation_object'):
-                        self.visualizer.update_simulation_object(object_name, obj)
-                except Exception as e:
-                    log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
+            # Batch rendering context reduces redundant renders while keeping interactive responsiveness
+            batch_ctx = getattr(self.visualizer, 'batch_mode', None)
+            if batch_ctx:
+                with batch_ctx():
+                    for robot_name, robot in self.robots.items():
+                        try:
+                            self.visualizer.update_robot_visualization(robot_name)
+                        except Exception as e:
+                            log_warning(self.logger, f"Robot visualization update error for {robot_name}: {e}")
+                    for object_name, obj in self.objects.items():
+                        try:
+                            if hasattr(self.visualizer, 'update_simulation_object'):
+                                self.visualizer.update_simulation_object(object_name, obj)
+                        except Exception as e:
+                            log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
+            else:
+                # Fallback original behavior
+                for robot_name, robot in self.robots.items():
+                    try:
+                        self.visualizer.update_robot_visualization(robot_name)
+                    except Exception as e:
+                        log_warning(self.logger, f"Robot visualization update error for {robot_name}: {e}")
+                for object_name, obj in self.objects.items():
+                    try:
+                        if hasattr(self.visualizer, 'update_simulation_object'):
+                            self.visualizer.update_simulation_object(object_name, obj)
+                    except Exception as e:
+                        log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
                         
             # Yield control back to SimPy
             yield self.env.timeout(dt)
@@ -587,6 +600,8 @@ class SimulationManager:
         log_info(self.logger, f"Update frequency: {self.config.update_frequency} Hz")
         if self.config.real_time_factor == 0.0:
             log_info(self.logger, "Real time factor: MAX SPEED (0.0)")
+            if self.config.visualization:
+                log_warning(self.logger, "RTF=0 with visualization will finish instantly. Use --rtf 1 for interactive viewing or remove --duration/auto_close.")
         else:
             log_info(self.logger, f"Real time factor: {self.config.real_time_factor}x")
         log_info(self.logger, f"Visualization: {'On' if self.config.visualization else 'Off'}")

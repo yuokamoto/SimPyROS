@@ -323,7 +323,7 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
         # Performance tracking
         total_callbacks = 0
         start_time = time.time()
-        
+
         def create_optimized_controller(robot_name, robot_id, robot_type, robot_instance):
             """Create high-performance controller optimized for 100+ robots with random movement patterns"""
             
@@ -342,9 +342,12 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
             
             # Get movable joints for arm robots
             movable_joints = []
+            phases = None
             if robot_type == "arm":
-                movable_joints = [name for name in robot_instance.get_joint_names() 
-                                if robot_instance.joints[name].joint_type.value != 'fixed']
+                movable_joints = [name for name in robot_instance.get_joint_names() if robot_instance.joints[name].joint_type.value != 'fixed']
+                if len(movable_joints) >= 4:
+                    # Cache phases for vectorized motions (varying amplitude/frequency/phase still per pattern)
+                    phases = np.arange(len(movable_joints), dtype=np.float64) * (math.pi/4)
             
             def controller(dt):
                 nonlocal total_callbacks
@@ -382,14 +385,22 @@ def multi_robots_performance_demo(num_robots=100, use_frequency_grouping=True, r
                     sim.set_robot_velocity(robot_name, velocity)
                     
                 elif robot_type == "arm":
-                    # Robot arm joint movement patterns
-                    for i, joint_name in enumerate(movable_joints):
-                        amplitude = 0.3 + (pattern % 3) * 0.2  # Varying amplitude: 0.3-0.7
-                        frequency = 0.3 + (pattern % 4) * 0.1  # Varying frequency: 0.3-0.6
-                        phase = i * math.pi / 4 + (pattern % 8) * math.pi / 8  # Varying phase
-                        position = amplitude * math.sin(t * frequency + phase)
-                        
-                        sim.set_robot_joint_position(robot_name, joint_name, position)
+                    if movable_joints:
+                        amplitude = 0.3 + (pattern % 3) * 0.2
+                        frequency = 0.3 + (pattern % 4) * 0.1
+                        base = t * frequency
+                        if phases is not None:
+                            # Add pattern-dependent phase shift
+                            offset = (pattern % 8) * math.pi / 8
+                            angles = base + phases + offset
+                            positions = amplitude * np.sin(angles)
+                            for jn, pos in zip(movable_joints, positions):
+                                sim.set_robot_joint_position(robot_name, jn, float(pos))
+                        else:
+                            for i, joint_name in enumerate(movable_joints):
+                                phase = i * math.pi / 4 + (pattern % 8) * math.pi / 8
+                                position = amplitude * math.sin(base + phase)
+                                sim.set_robot_joint_position(robot_name, joint_name, position)
             
             return controller
         
