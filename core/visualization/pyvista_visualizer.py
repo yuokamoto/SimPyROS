@@ -95,7 +95,19 @@ class PyVistaVisualizer:
         iren = getattr(p, 'iren', None)
         if iren is not None:
             try:
+                pending = False
+                if hasattr(iren, 'GetEventPending'):
+                    try:
+                        pending = bool(iren.GetEventPending())
+                    except Exception:
+                        pending = False
                 iren.ProcessEvents()
+                # If there were pending events (e.g., mouse drag), do a lightweight re-render
+                if pending:
+                    try:
+                        p.render()
+                    except Exception:
+                        pass
             except Exception:
                 pass
         # Qt/other app events
@@ -217,34 +229,15 @@ class BatchRenderingContext:
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Perform single render at end of batch for performance, then lightweight event polling
-        # Option A implementation:
-        #  - Use plotter.render() once (fast path, no full update cycle duplication)
-        #  - Immediately process pending UI events (camera, mouse, keyboard) WITHOUT calling plotter.update()
-        #    because plotter.update() would invoke an additional render (double cost per frame)
-        #  - VTK interactor event processing is significantly cheaper than a full render traversal
+        # New strategy: do NOT render here. Main loop will perform a throttled
+        # plotter.update() (which both processes events and renders), avoiding
+        # the previous interactivity loss while still batching geometry updates.
+        # Simply set a dirty flag that main loop can inspect if needed.
         if self.visualizer.available and self.visualizer.plotter:
             try:
-                p = self.visualizer.plotter
-                p.render()
-                # Try to process pending events to keep camera interactive
-                # Different PyVista versions expose interactor as .iren; guard defensively.
-                iren = getattr(p, 'iren', None)
-                if iren is not None:
-                    try:
-                        # Process a single batch of pending events (non-blocking)
-                        iren.ProcessEvents()
-                    except Exception:
-                        pass
-                # Alternative backends (Qt) may expose an application event processor
-                app = getattr(p, 'app', None)
-                if app is not None:
-                    try:
-                        app.processEvents()
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"⚠️ Batch rendering error: {e}")
+                self.visualizer._needs_render = True
+            except Exception:
+                pass
 
 
 # Convenience functions for quick setup

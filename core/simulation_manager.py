@@ -803,20 +803,26 @@ class SimulationManager:
                     if not self._run_simulation_step(simulation_end_time):
                         break
                 
-                # Update visualization if requested
-                if update_visualization:
-                    try:
-                        self.visualizer.plotter.update()
-                    except:
-                        # Window closed by user
-                        return False
-                else:
-                    # Batch rendering path: poll events to keep camera responsive
-                    try:
-                        if hasattr(self.visualizer, 'poll_events'):
-                            self.visualizer.poll_events()
-                    except Exception:
+                # Throttled interactive update strategy:
+                #  - Always allow plotter.update() to run (process events + render)
+                #  - But throttle by minimum interval to reduce GPU load when batch mode is active
+                try:
+                    if self.visualizer and hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
+                        now_real = time.time()
+                        min_interval = 1.0 / max(30.0, self.config.visualization_update_frequency)
+                        last_attr = '_last_interactive_render'
+                        last_time = getattr(self, last_attr, 0.0)
+                        if now_real - last_time >= min_interval:
+                            self.visualizer.plotter.update()
+                            setattr(self, last_attr, now_real)
+                        else:
+                            # Light event polling if skipped
+                            if hasattr(self.visualizer, 'poll_events'):
+                                self.visualizer.poll_events()
+                    else:
                         pass
+                except Exception:
+                    return False
             
             return True
             
