@@ -345,6 +345,25 @@ class Robot(SimulationObject):
                 return joint_active
         
         return False
+
+    # Override motion processing so base movement updates link poses for visualization
+    def _process_motion_update(self, dt: float, force_update: bool = False) -> bool:  # type: ignore[override]
+        """Process base motion and refresh forward kinematics.
+
+        The base SimulationObject updates only self.pose. For robots we also need to
+        propagate that new base pose to all link poses so visualizers that rely on
+        get_link_poses() see movement even when no joint commands are active.
+        Previously, link poses were refreshed only when joints updated, causing a
+        stationary-looking robot when only the base was moving. This override fixes
+        the mobile example where the robot appeared static despite changing velocity.
+        """
+        moved = super()._process_motion_update(dt, force_update)
+        if moved:
+            try:
+                self._update_forward_kinematics()
+            except Exception as e:  # Fail-safe: never break motion loop on FK error
+                log_warning(logger, f"Forward kinematics update after base motion failed: {e}")
+        return moved
     
     def _load_urdf(self) -> bool:
         """Load robot from URDF file"""
