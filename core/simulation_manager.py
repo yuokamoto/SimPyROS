@@ -490,29 +490,22 @@ class SimulationManager:
                         log_warning(self.logger, f"Control callback error for {robot_name}: {e}")
             
             self._frame_count += 1
-
+            
+            # Yield control
+            yield self.env.timeout(callback_dt)
+    
     def _visualization_process_loop(self):
-        """Visualization update process loop - independent SimPy process"""
+        """Visualization update process loop - SimPy pure environment with optimization support"""
         if not self.visualizer or not self.visualizer.available:
             return
+            
         dt = 1.0 / self.config.visualization_update_frequency
+        
         while self._running and not self._shutdown_requested:
-            try:
-                batch_ctx = getattr(self.visualizer, 'batch_mode', None)
-                if batch_ctx:
-                    with batch_ctx():
-                        for robot_name, robot in self.robots.items():
-                            try:
-                                self.visualizer.update_robot_visualization(robot_name)
-                            except Exception as e:
-                                log_warning(self.logger, f"Robot visualization update error for {robot_name}: {e}")
-                        for object_name, obj in self.objects.items():
-                            try:
-                                if hasattr(self.visualizer, 'update_simulation_object'):
-                                    self.visualizer.update_simulation_object(object_name, obj)
-                            except Exception as e:
-                                log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
-                else:
+            # Batch rendering context reduces redundant renders while keeping interactive responsiveness
+            batch_ctx = getattr(self.visualizer, 'batch_mode', None)
+            if batch_ctx:
+                with batch_ctx():
                     for robot_name, robot in self.robots.items():
                         try:
                             self.visualizer.update_robot_visualization(robot_name)
@@ -524,9 +517,22 @@ class SimulationManager:
                                 self.visualizer.update_simulation_object(object_name, obj)
                         except Exception as e:
                             log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
-                yield self.env.timeout(dt)
-            except simpy.core.EmptySchedule:
-                break
+            else:
+                # Fallback original behavior
+                for robot_name, robot in self.robots.items():
+                    try:
+                        self.visualizer.update_robot_visualization(robot_name)
+                    except Exception as e:
+                        log_warning(self.logger, f"Robot visualization update error for {robot_name}: {e}")
+                for object_name, obj in self.objects.items():
+                    try:
+                        if hasattr(self.visualizer, 'update_simulation_object'):
+                            self.visualizer.update_simulation_object(object_name, obj)
+                    except Exception as e:
+                        log_warning(self.logger, f"Object visualization update error for {object_name}: {e}")
+                        
+            # Yield control back to SimPy
+            yield self.env.timeout(dt)
     
     def _monitor_update_process_loop(self):
         """Independent process for monitor data updates"""
@@ -732,11 +738,6 @@ class SimulationManager:
                 simulation_end_time or self.env.now + step_size
             )
             self.env.run(until=target_time)
-            if getattr(self, '_profiling_enabled', False):
-                try:
-                    self._profile_samples['step_time'].append(time.time()-t0)
-                except Exception:
-                    pass
             return True
         except simpy.core.EmptySchedule:
             # All processes finished
@@ -791,11 +792,6 @@ class SimulationManager:
             bool: True if loop completed successfully, False if interrupted
         """
         try:
-            # Heartbeat / profiling state
-            last_hb_real = time.time()
-            hb_interval = 1.0  # seconds
-            steps_this_interval = 0
-            last_hb_sim = self.env.now
             while not self._shutdown_requested:
                 # Check if simulation time has ended (polling-based approach)
                 # This is executed every loop cycle for integration with visualization
@@ -807,31 +803,13 @@ class SimulationManager:
                     if not self._run_simulation_step(simulation_end_time):
                         break
                 
-                # Simple always-update visualization (freeze-safe baseline)
-                if self.visualizer and hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
+                # Update visualization if requested
+                if update_visualization:
                     try:
                         self.visualizer.plotter.update()
-                    except Exception:
+                    except:
+                        # Window closed by user
                         return False
-
-                # Profiling periodic log (every few seconds)
-                if getattr(self, '_profiling_enabled', False):
-                    try:
-                        now_prof = time.time()
-                        if not hasattr(self, '_profile_last_log'):
-                            self._profile_last_log = now_prof
-                        if now_prof - getattr(self, '_profile_last_log', 0.0) >= getattr(self, '_profile_interval', 2.0):
-                            step_samples = self._profile_samples.get('step_time', []) if hasattr(self, '_profile_samples') else []
-                            render_samples = self._profile_samples.get('render_time', []) if hasattr(self, '_profile_samples') else []
-                            avg_step = (sum(step_samples)/len(step_samples)) if step_samples else 0.0
-                            avg_render = (sum(render_samples)/len(render_samples)) if render_samples else 0.0
-                            log_debug(self.logger, f"[Profile] step={avg_step*1000:.2f}ms render={avg_render*1000:.2f}ms frames={self._frame_count}")
-                            # Reset samples
-                            if step_samples: step_samples.clear()
-                            if render_samples: render_samples.clear()
-                            self._profile_last_log = now_prof
-                    except Exception:
-                        pass
             
             return True
             
@@ -1029,20 +1007,6 @@ class SimulationManager:
         for object_name, obj in self.objects.items():
             try:
                 obj.stop_motion_process()
-
-                # Heartbeat / profiling log
-                steps_this_interval += 1
-                now_real_hb = time.time()
-                if now_real_hb - last_hb_real >= hb_interval:
-                    try:
-                        sim_advance = self.env.now - last_hb_sim
-                        fps = steps_this_interval / max(1e-6, (now_real_hb - last_hb_real))
-                        log_debug(self.logger, f"HB: sim_time={self.env.now:.2f}s (+{sim_advance:.2f}) real_fps={fps:.1f} vis_interval={min_interval:.3f}s")
-                    except Exception:
-                        pass
-                    last_hb_real = now_real_hb
-                    last_hb_sim = self.env.now
-                    steps_this_interval = 0
             except Exception as e:
                 log_warning(self.logger, f"Error shutting down object '{object_name}': {e}")
         

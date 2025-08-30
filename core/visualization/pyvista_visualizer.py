@@ -81,42 +81,6 @@ class PyVistaVisualizer:
     def batch_mode(self):
         """Context manager for batch rendering to improve performance"""
         return BatchRenderingContext(self)
-
-    def poll_events(self):
-        """Process pending UI events without triggering a full re-render.
-
-        Used when batch rendering suppresses plotter.update() so that camera
-        and interaction remain responsive. Safe to call frequently.
-        """
-        if not self.available or not getattr(self, 'plotter', None):
-            return
-        p = self.plotter
-        # VTK interactor events
-        iren = getattr(p, 'iren', None)
-        if iren is not None:
-            try:
-                pending = False
-                if hasattr(iren, 'GetEventPending'):
-                    try:
-                        pending = bool(iren.GetEventPending())
-                    except Exception:
-                        pending = False
-                iren.ProcessEvents()
-                # If there were pending events (e.g., mouse drag), do a lightweight re-render
-                if pending:
-                    try:
-                        p.render()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        # Qt/other app events
-        app = getattr(p, 'app', None)
-        if app is not None:
-            try:
-                app.processEvents()
-            except Exception:
-                pass
     
     def update_simulation_object(self, object_name: str, obj) -> bool:
         """Update visualization for a simulation object (box, sphere, etc.)
@@ -229,15 +193,13 @@ class BatchRenderingContext:
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # New strategy: do NOT render here. Main loop will perform a throttled
-        # plotter.update() (which both processes events and renders), avoiding
-        # the previous interactivity loss while still batching geometry updates.
-        # Simply set a dirty flag that main loop can inspect if needed.
+        # Perform single render at end of batch for performance
         if self.visualizer.available and self.visualizer.plotter:
             try:
-                self.visualizer._needs_render = True
-            except Exception:
-                pass
+                self.visualizer.plotter.render()
+                # Time display update removed - use monitor window
+            except Exception as e:
+                print(f"⚠️ Batch rendering error: {e}")
 
 
 # Convenience functions for quick setup
