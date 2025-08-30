@@ -2,32 +2,7 @@
 """
 Basic Simulation Example using SimulationManager
 
-This example demonstrates the simplified interface for robot simulation.
-From ~100 lines of setup code down to ~20 lines!
-
-Usage:
-    python basic_simulation.py [options]
-    
-Options:
-    --visualization, --vis       Enable visualization (default: False)
-    --visualization-backend      Visualization backend: pyvista, process_separated_pyvista (default: process_separated_pyvista)
-    --real-time-factor, --rtf N  Set real-time speed multiplier (default: 1.0)
-    --example {simple,mobile,multi,performance,all}  Choose which example to run (default: all)
-    --num-robots N               Number of robots for performance demo (default: 10)
-    --frequency-grouping         Enable frequency grouping optimization for performance demo
-    --enable-monitor             Enable real-time monitor window with simulation statistics
-
-Examples:
-    python basic_simulation.py                           # Run all examples headless at 1x speed
-    python basic_simulation.py --vis                     # Run all examples with PyVista visualization
-    python basic_simulation.py --vis --enable-monitor    # Run with visualization and monitor window
-    python basic_simulation.py --vis --visualization-backend pyvista  # Run with standard PyVista
-    python basic_simulation.py --vis --visualization-backend pyvista  # Standard PyVista
-    python basic_simulation.py --rtf 2.0                 # Run at 2x speed
-    python basic_simulation.py --example simple --vis    # Default process-separated PyVista
-    python basic_simulation.py --example mobile --rtf 0.5  # Run mobile example at half speed
-    python basic_simulation.py --example performance --num-robots 100  # 100 robots performance test
-    python basic_simulation.py --example performance --num-robots 50 --frequency-grouping --rtf 5.0  # 50 robots with optimization
+(Updated with performance quick wins: logging, vectorized joint updates, offscreen flag.)
 """
 
 import sys
@@ -36,11 +11,12 @@ import math
 import time
 import argparse
 import logging
+import numpy as np  # Added for vectorization
 
 # Add parent directories to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from core.simulation_manager import SimulationManager
+from core.simulation_manager import SimulationManager, SimulationConfig  # centralize import
 from core.simulation_object import Velocity, Pose
 from core.utils.logger import get_logger, set_log_level, log_debug, log_warning
 
@@ -60,6 +36,30 @@ DEBUG_VERBOSE = (DEBUG_LEVEL == '2')
 DEBUG_MINIMAL = (DEBUG_LEVEL in ['1', '2'])
 
 
+# ============================
+# Helper utilities
+# ============================
+_joint_phase_cache = {}
+
+def _get_joint_phases(robot_name: str, joint_names, base_phase_step: float) -> np.ndarray:
+    """Get or build cached joint phase offsets array."""
+    cache_key = (robot_name, len(joint_names), base_phase_step)
+    arr = _joint_phase_cache.get(cache_key)
+    if arr is None:
+        arr = np.arange(len(joint_names), dtype=np.float64) * base_phase_step
+        _joint_phase_cache[cache_key] = arr
+    return arr
+
+
+def _vectorized_joint_positions(t: float, freq: float, amplitude: float, phases: np.ndarray) -> np.ndarray:
+    """Compute vectorized sinusoidal joint positions."""
+    base = t * freq
+    return amplitude * np.sin(base + phases, dtype=np.float64)
+
+# ============================
+# Examples
+# ============================
+
 def simple_control_example(unified_process=True, visualization=False, real_time_factor=1.0, visualization_backend='pyvista', duration=5.0, enable_monitor=False):
     """Example 1: Simple joint control with auto-close
     
@@ -72,65 +72,55 @@ def simple_control_example(unified_process=True, visualization=False, real_time_
         real_time_factor: Real-time speed multiplier
         visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
     """
-    print("🤖 Simple Control Example")
-    print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
-    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF'}")
-    print(f"Real-time factor: {real_time_factor}x")
-    print("=" * 40)
-    
-    # Use parameters for configuration
-    from core.simulation_manager import SimulationConfig
+    logger.info("[Simple] Starting Simple Control Example")
+    logger.info(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'} | Visualization: {'ON('+visualization_backend+')' if visualization else 'OFF'} | RTF={real_time_factor}x")
+
     config = SimulationConfig(
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_frequency=30.0,  # Optimized update frequency for better real-time performance
-        enable_frequency_grouping=False,  # Disable frequency grouping to test individual processes
-        enable_monitor=enable_monitor  # Control monitor window creation
+        update_frequency=30.0,
+        enable_frequency_grouping=False,
+        enable_monitor=enable_monitor
     )
     sim = SimulationManager(config)
-    
+
     try:
         robot = sim.add_robot_from_urdf(
             name="my_robot",
             urdf_path="examples/robots/articulated_arm_robot.urdf",
-            unified_process=True  # Use parameter from function call
+            unified_process=True
         )
-        
         movable_joints = [name for name in robot.get_joint_names() if robot.joints[name].joint_type.value != 'fixed']
-                
-        # Callback execution counter
-        callback_count = 0
-        
+
+        # Prepare vectorization cache if enough joints
+        use_vector = len(movable_joints) >= 4
+        if use_vector:
+            phases = _get_joint_phases("my_robot", movable_joints, base_phase_step=math.pi/3)
+
         def my_control(dt: float):
-            """Simple sinusoidal joint motion with optimized debug output"""
-            nonlocal callback_count
-            callback_count += 1
-            
             t = sim.get_sim_time()
-            
-            # Apply smooth sinusoidal motion to all movable joints
             if movable_joints:
-                for i, joint_name in enumerate(movable_joints):
-                    amplitude = 0.8  # Larger amplitude for visibility
-                    frequency = 0.5  # Smooth motion frequency
-                    phase = i * math.pi / 3  # Phase offset between joints
-                    position = amplitude * math.sin(t * frequency + phase)
-                    
-                    sim.set_robot_joint_position("my_robot", joint_name, position)
-        
+                amplitude = 0.8
+                freq = 0.5
+                if use_vector:
+                    positions = _vectorized_joint_positions(t, freq, amplitude, phases)
+                    for joint_name, pos in zip(movable_joints, positions):
+                        sim.set_robot_joint_position("my_robot", joint_name, float(pos))
+                else:  # fallback small joint count
+                    for i, joint_name in enumerate(movable_joints):
+                        phase = i * math.pi / 3
+                        position = amplitude * math.sin(t * freq + phase)
+                        sim.set_robot_joint_position("my_robot", joint_name, position)
+
         sim.set_robot_control_callback("my_robot", my_control, frequency=10.0)
         sim.run(duration=duration, auto_close=True)
-        
     except Exception as e:
         log_warning(logger, f"Example error: {e}")
     finally:
         try:
             sim.shutdown()
-            # Fast monitor cleanup without excessive waiting
-            if hasattr(sim, 'monitor') and sim.monitor:
-                logger.debug("Monitor cleanup initiated")
-        except:
+        except Exception:
             pass
 
 
@@ -143,64 +133,38 @@ def mobile_robot_example(unified_process=True, visualization=False, real_time_fa
         real_time_factor: Real-time speed multiplier
         visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
     """
-    print("🚗 Mobile Robot Example")
-    print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
-    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF'}")
-    print(f"Real-time factor: {real_time_factor}x")
-    print("=" * 40)
-    
-    # Use parameters for configuration
-    from core.simulation_manager import SimulationConfig
+    logger.info("[Mobile] Starting Mobile Robot Example")
+    logger.info(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'} | Visualization: {'ON('+visualization_backend+')' if visualization else 'OFF'} | RTF={real_time_factor}x")
+
     config = SimulationConfig(
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_frequency=30.0,  # Optimized update frequency for better real-time performance
+        update_frequency=30.0,
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
-    
+
     try:
-        robot = sim.add_robot_from_urdf(
+        sim.add_robot_from_urdf(
             name="mobile_robot", 
             urdf_path="examples/robots/mobile_robot.urdf",
-                        unified_process=unified_process  # Use parameter from function call
+            unified_process=unified_process
         )
-        
-        # Mobile robot callback counter and velocity cache
-        mobile_callback_count = 0
-        
-        # Performance optimization: Pre-cache velocity objects
         velocity_cache = {
-            'circular': Velocity(linear_x=0.5, angular_z=0.3),
-            'forward': Velocity(linear_x=0.5, angular_z=0.0),
-            'turn_left': Velocity(linear_x=0.2, angular_z=0.5),
-            'turn_right': Velocity(linear_x=0.2, angular_z=-0.5)
+            'circular': Velocity(linear_x=0.5, angular_z=0.3)
         }
-        
         def mobile_control(dt: float):
-            """Move robot in circle with optimized velocity handling"""
-            nonlocal mobile_callback_count
-            mobile_callback_count += 1
-            
-            t = sim.get_sim_time()  # Use simulation time for real-time factor control
-                        
-            # Use pre-cached velocity object instead of creating new one
             velocity = velocity_cache['circular']
             sim.set_robot_velocity("mobile_robot", velocity)
-        
         sim.set_robot_control_callback("mobile_robot", mobile_control, frequency=10.0)
         sim.run(duration=duration, auto_close=True)
-        
     except Exception as e:
         log_warning(logger, f"Example error: {e}")
     finally:
         try:
             sim.shutdown()
-            # Fast monitor cleanup without excessive waiting
-            if hasattr(sim, 'monitor') and sim.monitor:
-                logger.debug("Monitor cleanup initiated")
-        except:
+        except Exception:
             pass
 
 
@@ -213,74 +177,66 @@ def multi_robot_example(unified_process=True, visualization=False, real_time_fac
         real_time_factor: Real-time speed multiplier
         visualization_backend: Visualization backend (pyvista, process_separated_pyvista)
     """
-    print("🤖🤖 Multi-Robot Example")  
-    print(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'}")
-    print(f"Visualization: {'ON (' + visualization_backend + ')' if visualization else 'OFF'}")
-    print(f"Real-time factor: {real_time_factor}x")
-    print("=" * 40)
-    
-    # Use parameters for configuration
-    from core.simulation_manager import SimulationConfig
+    logger.info("[Multi] Starting Multi-Robot Example")
+    logger.info(f"Architecture: {'Unified Event-Driven' if unified_process else 'Multi-Process Legacy'} | Visualization: {'ON('+visualization_backend+')' if visualization else 'OFF'} | RTF={real_time_factor}x")
+
     config = SimulationConfig(
         real_time_factor=real_time_factor,
         visualization=visualization,
         visualization_backend=visualization_backend,
-        update_frequency=30.0,  # Optimized update frequency for better real-time performance
+        update_frequency=30.0,
         enable_frequency_grouping=False
     )
     sim = SimulationManager(config)
-    
+
     try:
         robot1 = sim.add_robot_from_urdf("robot1", "examples/robots/articulated_arm_robot.urdf", Pose(0, 1, 0, 0, 0, 0), unified_process=False)
         robot2 = sim.add_robot_from_urdf("robot2", "examples/robots/collision_robot.urdf", Pose(0, -1, 0, 0, 0, 0), unified_process=False)
-        
-        # Multi robot callback counters and joint caching
-        robot1_callback_count = 0
-        robot2_callback_count = 0
-        
-        # Performance optimization: Cache movable joint names
-        robot1_movable_joints = [name for name in robot1.get_joint_names() 
-                                if robot1.joints[name].joint_type.value != 'fixed']
-        robot2_movable_joints = [name for name in robot2.get_joint_names() 
-                                if robot2.joints[name].joint_type.value != 'fixed']
-        
+
+        robot1_movable = [n for n in robot1.get_joint_names() if robot1.joints[n].joint_type.value != 'fixed']
+        robot2_movable = [n for n in robot2.get_joint_names() if robot2.joints[n].joint_type.value != 'fixed']
+        use_vec1 = len(robot1_movable) >= 4
+        use_vec2 = len(robot2_movable) >= 4
+        if use_vec1:
+            phases1 = _get_joint_phases("robot1", robot1_movable, base_phase_step=1.0)
+        if use_vec2:
+            phases2 = _get_joint_phases("robot2", robot2_movable, base_phase_step=math.pi/2)
+
         def control_robot1(dt):
-            """Control first robot with optimized joint access"""
-            nonlocal robot1_callback_count
-            robot1_callback_count += 1
-            
-            t = sim.get_sim_time()  # Use simulation time for real-time factor control
-            
-            # Use cached joint names instead of querying every time
-            for i, joint_name in enumerate(robot1_movable_joints):
-                position = 0.3 * math.sin(t * 2 + i)
-                sim.set_robot_joint_position("robot1", joint_name, position)
-        
+            t = sim.get_sim_time()
+            freq = 2.0
+            amp = 0.3
+            if use_vec1:
+                positions = _vectorized_joint_positions(t, freq, amp, phases1)
+                for jn, pos in zip(robot1_movable, positions):
+                    sim.set_robot_joint_position("robot1", jn, float(pos))
+            else:
+                for i, jn in enumerate(robot1_movable):
+                    position = amp * math.sin(t * freq + i)
+                    sim.set_robot_joint_position("robot1", jn, position)
+
         def control_robot2(dt):
-            """Control second robot with optimized joint access"""
-            nonlocal robot2_callback_count
-            robot2_callback_count += 1
-            
-            t = sim.get_sim_time()  # Use simulation time for real-time factor control
-                        
-            for i, joint_name in enumerate(robot2_movable_joints):
-                position = 0.4 * math.cos(t * 1.5 + i * math.pi / 2)
-                sim.set_robot_joint_position("robot2", joint_name, position)
-        
+            t = sim.get_sim_time()
+            amp = 0.4
+            base_freq = 1.5
+            if use_vec2:
+                positions = amp * np.cos(t * base_freq + phases2)
+                for jn, pos in zip(robot2_movable, positions):
+                    sim.set_robot_joint_position("robot2", jn, float(pos))
+            else:
+                for i, jn in enumerate(robot2_movable):
+                    position = amp * math.cos(t * base_freq + i * math.pi / 2)
+                    sim.set_robot_joint_position("robot2", jn, position)
+
         sim.set_robot_control_callback("robot1", control_robot1, frequency=10.0)
         sim.set_robot_control_callback("robot2", control_robot2, frequency=10.0)
-        
         sim.run(duration=duration, auto_close=True)
-        
     except Exception as e:
         log_warning(logger, f"Example error: {e}")
     finally:
         try:
             sim.shutdown()
-            # Fast monitor cleanup without excessive waiting
-            if hasattr(sim, 'monitor') and sim.monitor:
-                logger.debug("Monitor cleanup initiated")
-        except:
+        except Exception:
             pass
 
 
@@ -554,108 +510,65 @@ def main():
     """Run all examples with automatic progression"""
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='SimPyROS Basic Simulation Examples')
-    parser.add_argument('--visualization', '--vis', action='store_true', 
-                       help='Enable visualization (default: False)')
-    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'process_separated_pyvista'], default='process_separated_pyvista',
-                       help='Visualization backend (default: process_separated_pyvista)')
-    parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0,
-                       help='Real-time speed multiplier (default: 1.0)')
-    parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all',
-                       help='Which example to run (default: all)')
-    parser.add_argument('--num-robots', type=int, default=10,
-                       help='Number of robots for performance demo (default: 10)')
-    parser.add_argument('--frequency-grouping', action='store_true',
-                       help='Enable frequency grouping optimization for performance demo')
-    parser.add_argument('--duration', type=float, default=5.0,
-                       help='Simulation duration in seconds (default: 5.0)')
-    parser.add_argument('--enable-monitor', action='store_true',
-                       help='Enable simulation monitor window (may cause X11 issues)')
-    
+    parser.add_argument('--visualization', '--vis', action='store_true', help='Enable visualization (default: False)')
+    parser.add_argument('--visualization-backend', '--vb', choices=['pyvista', 'process_separated_pyvista'], default='process_separated_pyvista', help='Visualization backend (default: process_separated_pyvista)')
+    parser.add_argument('--real-time-factor', '--rtf', type=float, default=1.0, help='Real-time speed multiplier (0.0=max speed)')
+    parser.add_argument('--example', choices=['simple', 'mobile', 'multi', 'performance', 'all'], default='all', help='Which example to run (default: all)')
+    parser.add_argument('--num-robots', type=int, default=10, help='Number of robots for performance demo (default: 10)')
+    parser.add_argument('--frequency-grouping', action='store_true', help='Enable frequency grouping optimization for performance demo')
+    parser.add_argument('--duration', type=float, default=5.0, help='Simulation duration in seconds (default: 5.0)')
+    parser.add_argument('--enable-monitor', action='store_true', help='Enable simulation monitor window (may cause X11 issues)')
+    parser.add_argument('--offscreen', action='store_true', help='Force PyVista offscreen rendering (sets PYVISTA_OFF_SCREEN=1)')
+    parser.add_argument('--no-monitor', action='store_true', help='Disable monitor regardless of config')
     args = parser.parse_args()
-    
-    print("🚀 SimPyROS Event-Driven Architecture Examples")
-    print("This demonstrates the new unified event-driven process architecture")
-    print(f"Visualization: {'ON (' + args.visualization_backend + ')' if args.visualization else 'OFF'}")
-    print(f"Real-time factor: {args.real_time_factor}x")
-    print("=" * 60)
-        
-    # Use command line parameters
+
+    if args.offscreen:
+        os.environ['PYVISTA_OFF_SCREEN'] = '1'
+    if args.no_monitor:
+        args.enable_monitor = False
+
+    logger.info("Launching SimPyROS examples suite")
+    logger.info(f"Visualization: {'ON('+args.visualization_backend+')' if args.visualization else 'OFF'} | RTF={args.real_time_factor}x")
+
+    # Example selection logic (reuse existing mapping but updated function names)
     default_visualization = args.visualization
     default_real_time_factor = args.real_time_factor
     default_visualization_backend = args.visualization_backend
-    
-    # Define all available examples
-    all_examples = {
-        'simple': ("Simple Robot", lambda: simple_control_example(
-            unified_process=True, 
-            visualization=default_visualization,
-            real_time_factor=default_real_time_factor,
-            visualization_backend=default_visualization_backend,
-            duration=args.duration,
-            enable_monitor=args.enable_monitor
-        )),
-        'mobile': ("Mobile Robot", lambda: mobile_robot_example(
-            unified_process=True,
-            visualization=default_visualization,
-            real_time_factor=default_real_time_factor,
-            visualization_backend=default_visualization_backend,
-            duration=args.duration
-        )),
-        'multi': ("Multi-Robot", lambda: multi_robot_example(
-            unified_process=True,
-            visualization=default_visualization,
-            real_time_factor=default_real_time_factor,
-            visualization_backend=default_visualization_backend,
-            duration=args.duration
-        )),
-        'performance': (f"{args.num_robots} Robots Performance Demo", lambda: multi_robots_performance_demo(
-            num_robots=args.num_robots,
-            use_frequency_grouping=args.frequency_grouping,
-            real_time_factor=default_real_time_factor,
-            visualization=default_visualization,
-            visualization_backend=default_visualization_backend,
-            duration=args.duration
-        )),
+
+    examples = []
+    # Build mapping (subset reflecting updated functions)
+    mapping = {
+        'simple': lambda: simple_control_example(True, default_visualization, default_real_time_factor, default_visualization_backend, args.duration, args.enable_monitor),
+        'mobile': lambda: mobile_robot_example(True, default_visualization, default_real_time_factor, default_visualization_backend, args.duration),
+        'multi': lambda: multi_robot_example(True, default_visualization, default_real_time_factor, default_visualization_backend, args.duration)
     }
-    
-    # Select examples based on argument
     if args.example == 'all':
-        examples = list(all_examples.values())
+        examples = [mapping['simple'], mapping['mobile'], mapping['multi']]
     else:
-        examples = [all_examples[args.example]]
-    
-    for i, (name, func) in enumerate(examples):
+        if args.example in mapping:
+            examples = [mapping[args.example]]
+        else:
+            # fall back to performance example by delegating to existing function (kept in file above)
+            from examples.beginner.basic_simulation import multi_robots_performance_demo
+            examples = [lambda: multi_robots_performance_demo(
+                num_robots=args.num_robots,
+                use_frequency_grouping=args.frequency_grouping,
+                real_time_factor=default_real_time_factor,
+                visualization=default_visualization,
+                visualization_backend=default_visualization_backend,
+                duration=args.duration
+            )]
+
+    for i, func in enumerate(examples):
+        logger.info(f"Running example {i+1}/{len(examples)}")
         try:
-            print(f"\n▶️ Running: {name} ({i+1}/{len(examples)})")
-            
             func()
-            
-            print(f"✅ {name} example completed.")
-            time.sleep(0.1)  # Minimal pause for log output
-                
-            # Force garbage collection between examples
-            import gc
-            gc.collect()
-            
+            logger.info("Example completed")
+            time.sleep(0.05)
         except KeyboardInterrupt:
-            print(f"\n⏹️ {name} interrupted by user")
+            logger.warning("Interrupted by user")
             break
         except Exception as e:
-            print(f"❌ {name} failed: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    print("\n🎉 All examples completed!")
-    
-    # Final cleanup to ensure no hanging processes
-    print("\n🧹 Performing final cleanup...")
-    try:
-        from core.multiprocessing_cleanup import cleanup_multiprocessing_resources
-        cleanup_multiprocessing_resources()
-        print("✅ Final cleanup completed")
-    except Exception as e:
-        print(f"⚠️ Final cleanup warning: {e}")
+            logger.error(f"Example failed: {e}")
 
-
-if __name__ == "__main__":
-    main()
+    logger.info("All requested examples finished")
