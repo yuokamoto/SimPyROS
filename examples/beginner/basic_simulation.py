@@ -527,6 +527,11 @@ def main():
     if args.no_monitor:
         args.enable_monitor = False
 
+    # Auto-enable visualization if user specified backend but forgot --vis
+    if not args.visualization and any(flag in sys.argv for flag in ['--vb', '--visualization-backend']):
+        logger.info("Auto-enabling visualization because --visualization-backend was specified without --vis")
+        args.visualization = True
+
     logger.info("Launching SimPyROS examples suite")
     logger.info(f"Visualization: {'ON('+args.visualization_backend+')' if args.visualization else 'OFF'} | RTF={args.real_time_factor}x")
 
@@ -572,3 +577,7 @@ def main():
             logger.error(f"Example failed: {e}")
 
     logger.info("All requested examples finished")
+
+if __name__ == "__main__":
+    # Ensure main executes when script run directly
+    main()
