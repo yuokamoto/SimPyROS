@@ -81,6 +81,30 @@ class PyVistaVisualizer:
     def batch_mode(self):
         """Context manager for batch rendering to improve performance"""
         return BatchRenderingContext(self)
+
+    def poll_events(self):
+        """Process pending UI events without triggering a full re-render.
+
+        Used when batch rendering suppresses plotter.update() so that camera
+        and interaction remain responsive. Safe to call frequently.
+        """
+        if not self.available or not getattr(self, 'plotter', None):
+            return
+        p = self.plotter
+        # VTK interactor events
+        iren = getattr(p, 'iren', None)
+        if iren is not None:
+            try:
+                iren.ProcessEvents()
+            except Exception:
+                pass
+        # Qt/other app events
+        app = getattr(p, 'app', None)
+        if app is not None:
+            try:
+                app.processEvents()
+            except Exception:
+                pass
     
     def update_simulation_object(self, object_name: str, obj) -> bool:
         """Update visualization for a simulation object (box, sphere, etc.)

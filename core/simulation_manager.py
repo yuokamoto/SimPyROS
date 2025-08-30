@@ -810,6 +810,13 @@ class SimulationManager:
                     except:
                         # Window closed by user
                         return False
+                else:
+                    # Batch rendering path: poll events to keep camera responsive
+                    try:
+                        if hasattr(self.visualizer, 'poll_events'):
+                            self.visualizer.poll_events()
+                    except Exception:
+                        pass
             
             return True
             
