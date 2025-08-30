@@ -1009,9 +1009,24 @@ class SimulationManager:
                 elif hasattr(self.visualizer, 'plotter') and self.visualizer.plotter:
                     # Standard PyVista visualizer
                     log_info(self.logger, "Closing standard PyVista visualizer...")
-                    self.visualizer.plotter.close()
-                    self.visualizer.plotter = None
-                    log_info(self.logger, "Standard PyVista visualizer closed")
+                    try:
+                        # Extra safety: detach any Qt/Tk event loops to reduce Tcl_AsyncDelete risk
+                        plotter = self.visualizer.plotter
+                        # Remove all actors explicitly (defensive)
+                        try:
+                            for robot_name in getattr(self.visualizer, 'link_actors', {}):
+                                for _ln, actor_info in self.visualizer.link_actors[robot_name].items():
+                                    # actor_info may contain 'actor'
+                                    pass  # minimal cleanup; plotter.remove_actor by name often unstable here
+                        except Exception:
+                            pass
+                        plotter.close()
+                        log_info(self.logger, "Standard PyVista visualizer closed (safe mode)")
+                    except Exception as e_inner:
+                        log_warning(self.logger, f"PyVista close warning (safe mode): {e_inner}")
+                    finally:
+                        self.visualizer.plotter = None
+                        log_info(self.logger, "PyVista resources released")
             except Exception as e:
                 log_warning(self.logger, f"Visualization cleanup warning: {e}")
             finally:

@@ -388,3 +388,13 @@ After mastering SimPyROS:
 **🎯 SimPyROS demonstrates that centralized update management with unified time control is superior to complex multi-process designs. Experience the performance difference!**
 
 *Latest Update: August 2025 - Revolutionary centralized architecture with unified time management and processing time compensation*
+\n+## Known Issues
+\n+### Tcl_AsyncDelete (Tk) Crash After Exit
+標準 PyVista (Tk ベース) のインタラクティブウィンドウ終了時に `Tcl_AsyncDelete: async handler deleted by the wrong thread` が稀に発生し、終了コード 134 (core dump) になる既知問題があります。これは描画結果出力後・ログ出力後に発生するためシミュレーション自体の結果には影響しません。
+\n+緩和策:
+1. プロセス分離版を使う: `--vb process_separated_pyvista`
+2. オフスクリーン描画: `--offscreen` (表示不要なバッチ/CI 実行向け)
+3. Panel/pyvistaqt を利用できる環境では `PYVISTA_USE_PANEL=1` を設定 (別イベントループ)
+4. ごく短い `--duration` 実行直後に即終了するケースを避け、2–3 秒余裕を持たせる
+5. 終了処理は `SimulationManager.shutdown()` で safe-mode close を実装済み (追加の actor remove は不安定なため最小化)
+\n+影響: 例外は終了シーケンス末尾で発生し、ログはすでに出力済み。CI で失敗扱いにしたくない場合は `--offscreen` や process-separated バックエンドを推奨。
