@@ -665,7 +665,20 @@ class SimulationManager:
                     # Process-separated or headless mode
                     log_info(self.logger, "Running with process-separated visualization")
                     
-                self._run_simulation_loop(simulation_end_time, duration, auto_close, update_visualization=not is_process_separated)
+                # 重複レンダー抑制:
+                #  - _visualization_process_loop 内で batch_mode によりまとめて render()
+                #  - ここで plotter.update() を同時に呼ぶと同一フレームで二重描画 (性能低下)
+                #  ⇒ batch_mode 有効時は main ループでの plotter.update() を抑制
+                use_batch = (hasattr(self.visualizer, 'batch_mode') and 
+                              callable(getattr(self.visualizer, 'batch_mode')) and 
+                              getattr(self.config, 'enable_batch_rendering', True))
+                update_vis_flag = (not is_process_separated) and (not use_batch)
+                self._run_simulation_loop(
+                    simulation_end_time,
+                    duration,
+                    auto_close,
+                    update_visualization=update_vis_flag
+                )
             else:
                 # Headless mode: Use event-driven duration monitoring for optimal efficiency
                 # This is different from visualization mode which uses polling-based loop
